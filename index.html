@@ -3,371 +3,719 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BotVerse - Top Rated Bots</title>
+    <title>PostFlow — Social Media Scheduling</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #09090b;
+            --surface: #18181b;
+            --border: #27272a;
+            --text: #fafafa;
+            --muted: #a1a1aa;
+            --accent: #f97316;
+            --accent-light: #fdba74;
+            --purple: #a855f7;
+            --radius: 16px;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        :root {
-            --bg: #0d1117;
-            --card: #161b22;
-            --border: #30363d;
-            --text: #e6edf3;
-            --muted: #8b949e;
-            --accent: #58a6ff;
-            --green: #3fb950;
-            --purple: #bc8cff;
-            --telegram: #0088cc;
-            --discord: #5865f2;
-        }
+        html { scroll-behavior: smooth; }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Geist', sans-serif;
             background: var(--bg);
             color: var(--text);
-            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
         }
 
-        /* Header */
-        header {
-            padding: 2rem;
-            text-align: center;
-            border-bottom: 1px solid var(--border);
+        /* Animated gradient background */
+        .bg-gradient {
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at 20% 50%, rgba(249, 115, 22, 0.08) 0%, transparent 50%),
+                        radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.06) 0%, transparent 50%),
+                        radial-gradient(ellipse at 50% 80%, rgba(249, 115, 22, 0.04) 0%, transparent 50%);
+            animation: bgMove 20s ease-in-out infinite alternate;
+            z-index: -1;
+            pointer-events: none;
         }
 
-        .logo {
-            font-size: 2.5rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, var(--accent), var(--purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 0.5rem;
+        @keyframes bgMove {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(2%, 3%) rotate(3deg); }
         }
 
-        .tagline {
+        /* Grain overlay */
+        .grain {
+            position: fixed;
+            inset: 0;
+            opacity: 0.025;
+            z-index: -1;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 1rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(12px);
+            background: rgba(9, 9, 11, 0.7);
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.3s;
+        }
+
+        nav.scrolled {
+            border-bottom-color: var(--border);
+        }
+
+        .nav-logo {
+            font-family: 'Instrument Serif', serif;
+            font-size: 1.5rem;
+            color: var(--text);
+            text-decoration: none;
+        }
+
+        .nav-logo span {
+            color: var(--accent);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
             color: var(--muted);
-            font-size: 1.1rem;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
         }
+
+        .nav-links a:hover { color: var(--text); }
+
+        .nav-cta {
+            padding: 0.5rem 1.25rem;
+            background: var(--text);
+            color: var(--bg);
+            border: none;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, opacity 0.2s;
+            text-decoration: none;
+        }
+
+        .nav-cta:hover { transform: scale(1.03); opacity: 0.9; }
 
         /* Hero */
         .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             text-align: center;
-            padding: 4rem 2rem;
-            max-width: 700px;
-            margin: 0 auto;
+            padding: 6rem 2rem 4rem;
         }
 
-        .hero h2 {
-            font-size: 2rem;
-            margin-bottom: 1rem;
-            line-height: 1.3;
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 1rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 50px;
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-bottom: 2rem;
+            opacity: 0;
+            animation: fadeUp 0.8s ease forwards 0.2s;
+        }
+
+        .hero-badge .dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .hero h1 {
+            font-family: 'Instrument Serif', serif;
+            font-size: clamp(3rem, 8vw, 6rem);
+            line-height: 1.05;
+            letter-spacing: -0.03em;
+            max-width: 900px;
+            opacity: 0;
+            animation: fadeUp 0.8s ease forwards 0.4s;
+        }
+
+        .hero h1 .italic {
+            font-style: italic;
+            color: var(--accent-light);
         }
 
         .hero p {
+            font-size: 1.15rem;
             color: var(--muted);
-            font-size: 1.1rem;
+            max-width: 550px;
+            margin: 1.5rem auto 2.5rem;
             line-height: 1.6;
+            opacity: 0;
+            animation: fadeUp 0.8s ease forwards 0.6s;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 1rem;
+            opacity: 0;
+            animation: fadeUp 0.8s ease forwards 0.8s;
+        }
+
+        .btn-primary {
+            padding: 0.75rem 1.75rem;
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(249, 115, 22, 0.3);
+        }
+
+        .btn-secondary {
+            padding: 0.75rem 1.75rem;
+            background: transparent;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: border-color 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-secondary:hover { border-color: var(--muted); }
+
+        /* Dashboard Preview */
+        .preview {
+            padding: 2rem;
+            max-width: 1100px;
+            margin: 0 auto;
+            opacity: 0;
+            animation: fadeUp 1s ease forwards 1s;
+        }
+
+        .dashboard-mock {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4);
+        }
+
+        .mock-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .mock-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .mock-dot:nth-child(1) { background: #ef4444; }
+        .mock-dot:nth-child(2) { background: #eab308; }
+        .mock-dot:nth-child(3) { background: #22c55e; }
+
+        .mock-body {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            min-height: 400px;
+        }
+
+        .mock-sidebar {
+            border-right: 1px solid var(--border);
+            padding: 1.5rem 1rem;
+        }
+
+        .mock-sidebar-item {
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: var(--muted);
+            margin-bottom: 0.25rem;
+        }
+
+        .mock-sidebar-item.active {
+            background: rgba(249, 115, 22, 0.1);
+            color: var(--accent);
+            font-weight: 500;
+        }
+
+        .mock-content {
+            padding: 1.5rem;
+        }
+
+        .mock-calendar {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 0.5rem;
+        }
+
+        .mock-day {
+            aspect-ratio: 1;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            color: var(--muted);
+            position: relative;
+        }
+
+        .mock-day.has-post::after {
+            content: '';
+            position: absolute;
+            bottom: 6px;
+            width: 4px;
+            height: 4px;
+            background: var(--accent);
+            border-radius: 50%;
+        }
+
+        .mock-day.today {
+            border: 1px solid var(--accent);
+            color: var(--text);
+        }
+
+        /* Features */
+        .features {
+            padding: 6rem 2rem;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .section-label {
+            text-align: center;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .section-title {
+            font-family: 'Instrument Serif', serif;
+            font-size: clamp(2rem, 5vw, 3rem);
+            text-align: center;
+            margin-bottom: 3rem;
+            letter-spacing: -0.02em;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2rem;
+            transition: transform 0.3s, border-color 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(249, 115, 22, 0.3);
+        }
+
+        .feature-icon {
+            width: 44px;
+            height: 44px;
+            background: rgba(249, 115, 22, 0.1);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-card p {
+            color: var(--muted);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* Platforms */
+        .platforms {
+            padding: 4rem 2rem 6rem;
+            text-align: center;
+        }
+
+        .platforms h2 {
+            font-family: 'Instrument Serif', serif;
+            font-size: clamp(1.5rem, 4vw, 2.5rem);
             margin-bottom: 2rem;
         }
 
-        .stats {
+        .platform-icons {
             display: flex;
             justify-content: center;
-            gap: 3rem;
-            margin-top: 2rem;
+            gap: 2rem;
+            flex-wrap: wrap;
         }
 
-        .stat {
+        .platform-icon {
+            width: 56px;
+            height: 56px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            transition: transform 0.3s, border-color 0.3s;
+        }
+
+        .platform-icon:hover {
+            transform: translateY(-4px);
+            border-color: var(--accent);
+        }
+
+        /* Stats */
+        .stats {
+            padding: 4rem 2rem;
+            max-width: 900px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
             text-align: center;
         }
 
         .stat-number {
-            font-size: 2rem;
-            font-weight: 700;
+            font-family: 'Instrument Serif', serif;
+            font-size: 3rem;
             color: var(--accent);
         }
 
         .stat-label {
             color: var(--muted);
-            font-size: 0.85rem;
-            margin-top: 0.25rem;
-        }
-
-        /* Bots Grid */
-        .bots-section {
-            padding: 3rem 2rem;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .section-title {
-            font-size: 1.5rem;
-            margin-bottom: 2rem;
-            text-align: center;
-        }
-
-        .bots-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .bot-card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 1.5rem;
-            transition: transform 0.2s, border-color 0.2s;
-        }
-
-        .bot-card:hover {
-            transform: translateY(-4px);
-            border-color: var(--accent);
-        }
-
-        .bot-header {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 1rem;
-        }
-
-        .bot-avatar {
-            width: 48px;
-            height: 48px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, var(--accent), var(--purple));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: white;
-        }
-
-        .bot-name {
-            font-size: 1.1rem;
-            font-weight: 600;
-        }
-
-        .bot-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.3rem;
-            font-size: 0.75rem;
-            padding: 0.2rem 0.6rem;
-            border-radius: 50px;
-            margin-top: 0.3rem;
-        }
-
-        .badge-telegram {
-            background: rgba(0, 136, 204, 0.15);
-            color: var(--telegram);
-        }
-
-        .badge-discord {
-            background: rgba(88, 101, 242, 0.15);
-            color: var(--discord);
-        }
-
-        .bot-desc {
-            color: var(--muted);
             font-size: 0.9rem;
-            line-height: 1.5;
-            margin-bottom: 1rem;
-        }
-
-        .bot-stats {
-            display: flex;
-            gap: 1rem;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border);
-        }
-
-        .bot-stat {
-            font-size: 0.8rem;
-            color: var(--muted);
-        }
-
-        .bot-stat span {
-            color: var(--green);
-            font-weight: 600;
+            margin-top: 0.5rem;
         }
 
         /* CTA */
         .cta {
+            padding: 6rem 2rem;
             text-align: center;
-            padding: 4rem 2rem;
         }
 
-        .cta-btn {
-            display: inline-block;
-            padding: 0.8rem 2rem;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            text-decoration: none;
-            transition: opacity 0.2s;
-            margin: 0.5rem;
-        }
-
-        .cta-primary {
-            background: var(--accent);
-            color: #000;
-        }
-
-        .cta-secondary {
-            background: transparent;
+        .cta-box {
+            max-width: 600px;
+            margin: 0 auto;
+            background: var(--surface);
             border: 1px solid var(--border);
-            color: var(--text);
+            border-radius: 24px;
+            padding: 4rem 2rem;
+            position: relative;
+            overflow: hidden;
         }
 
-        .cta-btn:hover {
-            opacity: 0.85;
+        .cta-box::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at center, rgba(249, 115, 22, 0.06) 0%, transparent 60%);
+            animation: bgMove 10s ease-in-out infinite alternate;
+        }
+
+        .cta-box h2 {
+            font-family: 'Instrument Serif', serif;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            position: relative;
+        }
+
+        .cta-box p {
+            color: var(--muted);
+            margin-bottom: 2rem;
+            position: relative;
+        }
+
+        .cta-box .btn-primary {
+            position: relative;
         }
 
         /* Footer */
         footer {
-            text-align: center;
             padding: 2rem;
+            text-align: center;
             border-top: 1px solid var(--border);
             color: var(--muted);
             font-size: 0.85rem;
         }
 
         footer a {
-            color: var(--accent);
+            color: var(--text);
             text-decoration: none;
+        }
+
+        /* Animations */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(24px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.8s ease, transform 0.8s ease;
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+            .mock-body { grid-template-columns: 1fr; }
+            .mock-sidebar { display: none; }
+            .hero-actions { flex-direction: column; }
+            .features-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <header>
-        <div class="logo">BotVerse</div>
-        <p class="tagline">Discover top rated bots for Telegram & Discord</p>
-    </header>
+    <div class="bg-gradient"></div>
+    <div class="grain"></div>
+
+    <nav>
+        <a href="#" class="nav-logo">Post<span>Flow</span></a>
+        <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#platforms">Platforms</a></li>
+            <li><a href="#cta">Get Started</a></li>
+        </ul>
+        <a href="#cta" class="nav-cta">Start Free</a>
+    </nav>
 
     <section class="hero">
-        <h2>Your bot's home on the internet 🤖</h2>
-        <p>A curated collection of the best Telegram and Discord bots. Built by the community, for the community.</p>
-        <div class="stats">
-            <div class="stat">
-                <div class="stat-number">12+</div>
-                <div class="stat-label">Bots Listed</div>
-            </div>
-            <div class="stat">
-                <div class="stat-number">5K+</div>
-                <div class="stat-label">Users</div>
-            </div>
-            <div class="stat">
-                <div class="stat-number">4.8</div>
-                <div class="stat-label">Avg Rating</div>
-            </div>
+        <div class="hero-badge">
+            <span class="dot"></span>
+            Now in beta — join the waitlist
+        </div>
+        <h1>Schedule your social media <span class="italic">effortlessly</span></h1>
+        <p>Plan, schedule, and analyze your posts across all platforms. AI-powered timing to maximize your reach.</p>
+        <div class="hero-actions">
+            <a href="#cta" class="btn-primary">Get Early Access</a>
+            <a href="#features" class="btn-secondary">See Features</a>
         </div>
     </section>
 
-    <section class="bots-section">
-        <h3 class="section-title">Featured Bots</h3>
-        <div class="bots-grid">
-            <div class="bot-card">
-                <div class="bot-header">
-                    <div class="bot-avatar">M</div>
-                    <div>
-                        <div class="bot-name">ModGuard</div>
-                        <span class="bot-badge badge-discord">Discord</span>
-                    </div>
-                </div>
-                <p class="bot-desc">Advanced moderation bot with auto-mod, logging, and custom filters. Keep your server safe 24/7.</p>
-                <div class="bot-stats">
-                    <div class="bot-stat">⭐ <span>4.9</span></div>
-                    <div class="bot-stat">👥 <span>2.1K users</span></div>
-                </div>
+    <section class="preview">
+        <div class="dashboard-mock">
+            <div class="mock-header">
+                <div class="mock-dot"></div>
+                <div class="mock-dot"></div>
+                <div class="mock-dot"></div>
             </div>
-
-            <div class="bot-card">
-                <div class="bot-header">
-                    <div class="bot-avatar">T</div>
-                    <div>
-                        <div class="bot-name">TeleTracker</div>
-                        <span class="bot-badge badge-telegram">Telegram</span>
+            <div class="mock-body">
+                <div class="mock-sidebar">
+                    <div class="mock-sidebar-item active">📅 Calendar</div>
+                    <div class="mock-sidebar-item">📝 Posts</div>
+                    <div class="mock-sidebar-item">📊 Analytics</div>
+                    <div class="mock-sidebar-item">💡 AI Ideas</div>
+                    <div class="mock-sidebar-item">⚙️ Settings</div>
+                </div>
+                <div class="mock-content">
+                    <div class="mock-calendar">
+                        <div class="mock-day">1</div>
+                        <div class="mock-day">2</div>
+                        <div class="mock-day has-post">3</div>
+                        <div class="mock-day">4</div>
+                        <div class="mock-day has-post">5</div>
+                        <div class="mock-day">6</div>
+                        <div class="mock-day">7</div>
+                        <div class="mock-day has-post">8</div>
+                        <div class="mock-day">9</div>
+                        <div class="mock-day">10</div>
+                        <div class="mock-day has-post">11</div>
+                        <div class="mock-day">12</div>
+                        <div class="mock-day">13</div>
+                        <div class="mock-day has-post">14</div>
+                        <div class="mock-day">15</div>
+                        <div class="mock-day">16</div>
+                        <div class="mock-day has-post">17</div>
+                        <div class="mock-day today">18</div>
+                        <div class="mock-day">19</div>
+                        <div class="mock-day">20</div>
+                        <div class="mock-day has-post">21</div>
+                        <div class="mock-day">22</div>
+                        <div class="mock-day">23</div>
+                        <div class="mock-day">24</div>
+                        <div class="mock-day has-post">25</div>
+                        <div class="mock-day">26</div>
+                        <div class="mock-day">27</div>
+                        <div class="mock-day">28</div>
+                        <div class="mock-day has-post">29</div>
+                        <div class="mock-day">30</div>
+                        <div class="mock-day">31</div>
                     </div>
-                </div>
-                <p class="bot-desc">Track packages, get notifications, and manage your deliveries right inside Telegram.</p>
-                <div class="bot-stats">
-                    <div class="bot-stat">⭐ <span>4.7</span></div>
-                    <div class="bot-stat">👥 <span>1.5K users</span></div>
-                </div>
-            </div>
-
-            <div class="bot-card">
-                <div class="bot-header">
-                    <div class="bot-avatar">N</div>
-                    <div>
-                        <div class="bot-name">NotifyBot</div>
-                        <span class="bot-badge badge-discord">Discord</span>
-                    </div>
-                </div>
-                <p class="bot-desc">Get YouTube, Twitch, and Twitter notifications directly in your Discord server.</p>
-                <div class="bot-stats">
-                    <div class="bot-stat">⭐ <span>4.8</span></div>
-                    <div class="bot-stat">👥 <span>3.2K users</span></div>
-                </div>
-            </div>
-
-            <div class="bot-card">
-                <div class="bot-header">
-                    <div class="bot-avatar">P</div>
-                    <div>
-                        <div class="bot-name">PollMaster</div>
-                        <span class="bot-badge badge-telegram">Telegram</span>
-                    </div>
-                </div>
-                <p class="bot-desc">Create beautiful polls and surveys with real-time results. Perfect for communities.</p>
-                <div class="bot-stats">
-                    <div class="bot-stat">⭐ <span>4.6</span></div>
-                    <div class="bot-stat">👥 <span>890 users</span></div>
-                </div>
-            </div>
-
-            <div class="bot-card">
-                <div class="bot-header">
-                    <div class="bot-avatar">A</div>
-                    <div>
-                        <div class="bot-name">AutoRole</div>
-                        <span class="bot-badge badge-discord">Discord</span>
-                    </div>
-                </div>
-                <p class="bot-desc">Automatically assign roles based on reactions, time, and activity. Zero config needed.</p>
-                <div class="bot-stats">
-                    <div class="bot-stat">⭐ <span>4.9</span></div>
-                    <div class="bot-stat">👥 <span>4.1K users</span></div>
-                </div>
-            </div>
-
-            <div class="bot-card">
-                <div class="bot-header">
-                    <div class="bot-avatar">R</div>
-                    <div>
-                        <div class="bot-name">RemindMe</div>
-                        <span class="bot-badge badge-telegram">Telegram</span>
-                    </div>
-                </div>
-                <p class="bot-desc">Smart reminders with natural language support. "Remind me in 20 mins" just works.</p>
-                <div class="bot-stats">
-                    <div class="bot-stat">⭐ <span>4.8</span></div>
-                    <div class="bot-stat">👥 <span>2.7K users</span></div>
                 </div>
             </div>
         </div>
     </section>
 
-    <section class="cta">
-        <a href="#" class="cta-btn cta-primary">Submit Your Bot</a>
-        <a href="#" class="cta-btn cta-secondary">Join Community</a>
+    <section class="features" id="features">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Everything you need to grow</h2>
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">🗓️</div>
+                <h3>Smart Calendar</h3>
+                <p>Visual drag-and-drop calendar to plan weeks of content in minutes. See your entire strategy at a glance.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🤖</div>
+                <h3>AI Best Times</h3>
+                <p>Our AI analyzes your audience to recommend optimal posting times for maximum engagement.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">📊</div>
+                <h3>Deep Analytics</h3>
+                <p>Track likes, comments, shares, and growth across all platforms in one unified dashboard.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">💡</div>
+                <h3>Content Ideas</h3>
+                <p>Never run out of ideas. AI-generated post suggestions tailored to your niche and audience.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔄</div>
+                <h3>Auto Recycle</h3>
+                <p>Set evergreen posts to republish automatically. Your best content works harder for you.</p>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">👥</div>
+                <h3>Team Collaboration</h3>
+                <p>Invite team members, assign roles, and approve posts before they go live.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="platforms" id="platforms">
+        <h2>All your platforms, one tool</h2>
+        <div class="platform-icons">
+            <div class="platform-icon">𝕏</div>
+            <div class="platform-icon">📷</div>
+            <div class="platform-icon">👤</div>
+            <div class="platform-icon">💼</div>
+            <div class="platform-icon">📌</div>
+            <div class="platform-icon">🎵</div>
+        </div>
+    </section>
+
+    <section class="stats reveal">
+        <div class="stat">
+            <div class="stat-number">12K+</div>
+            <div class="stat-label">Posts Scheduled</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number">4.9</div>
+            <div class="stat-label">User Rating</div>
+        </div>
+        <div class="stat">
+            <div class="stat-number">50+</div>
+            <div class="stat-label">Countries</div>
+        </div>
+    </section>
+
+    <section class="cta" id="cta">
+        <div class="cta-box">
+            <h2>Ready to automate?</h2>
+            <p>Join the waitlist and be first to know when we launch. No spam, ever.</p>
+            <a href="#" class="btn-primary">Join Waitlist</a>
+        </div>
     </section>
 
     <footer>
-        <p>Built with ❤️ by <a href="https://github.com/10xdev4u-alt">10xdev4u-alt</a> &middot; Hosted on <a href="https://github.com">GitHub Pages</a></p>
+        <p>Built with ❤️ by <a href="https://github.com/10xdev4u-alt">10xdev4u-alt</a> &middot; <a href="https://github.com/10xdev4u-alt/princedotdev">Open Source</a></p>
         <p style="margin-top: 0.5rem;">princedotdev.is-a.bot</p>
     </footer>
+
+    <script>
+        // Scroll reveal
+        const reveals = document.querySelectorAll('.reveal');
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+
+        reveals.forEach(el => observer.observe(el));
+
+        // Nav scroll effect
+        const nav = document.querySelector('nav');
+        window.addEventListener('scroll', () => {
+            nav.classList.toggle('scrolled', window.scrollY > 50);
+        });
+    </script>
 </body>
 </html>
