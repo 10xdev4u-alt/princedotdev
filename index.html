@@ -3,27 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PostFlow — Social Media Scheduling</title>
+    <title>PostPlan — Static HTML Draft Publishing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #09090b;
-            --surface: #18181b;
-            --border: #27272a;
-            --text: #fafafa;
-            --muted: #a1a1aa;
+            --bg: #0a0a0b;
+            --surface: #111113;
+            --border: #1e1e22;
+            --text: #ededed;
+            --muted: #6b6b73;
+            --green: #4ade80;
+            --green-dim: rgba(74, 222, 128, 0.1);
             --accent: #f97316;
-            --accent-light: #fdba74;
-            --purple: #a855f7;
-            --radius: 16px;
+            --radius: 12px;
         }
-
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         html { scroll-behavior: smooth; }
-
         body {
             font-family: 'Geist', sans-serif;
             background: var(--bg);
@@ -31,691 +28,227 @@
             overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
         }
-
-        /* Animated gradient background */
-        .bg-gradient {
-            position: fixed;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(ellipse at 20% 50%, rgba(249, 115, 22, 0.08) 0%, transparent 50%),
-                        radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.06) 0%, transparent 50%),
-                        radial-gradient(ellipse at 50% 80%, rgba(249, 115, 22, 0.04) 0%, transparent 50%);
-            animation: bgMove 20s ease-in-out infinite alternate;
-            z-index: -1;
-            pointer-events: none;
-        }
-
-        @keyframes bgMove {
-            0% { transform: translate(0, 0) rotate(0deg); }
-            100% { transform: translate(2%, 3%) rotate(3deg); }
-        }
-
-        /* Grain overlay */
-        .grain {
+        body::after {
+            content: '';
             position: fixed;
             inset: 0;
-            opacity: 0.025;
-            z-index: -1;
+            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
             pointer-events: none;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+            z-index: 9999;
         }
-
-        /* Navigation */
+        .grain {
+            position: fixed; inset: 0; opacity: 0.015; z-index: -1; pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
         nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            padding: 1rem 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            backdrop-filter: blur(12px);
-            background: rgba(9, 9, 11, 0.7);
-            border-bottom: 1px solid transparent;
-            transition: border-color 0.3s;
-        }
-
-        nav.scrolled {
-            border-bottom-color: var(--border);
-        }
-
-        .nav-logo {
-            font-family: 'Instrument Serif', serif;
-            font-size: 1.5rem;
-            color: var(--text);
-            text-decoration: none;
-        }
-
-        .nav-logo span {
-            color: var(--accent);
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 2rem;
-            list-style: none;
-        }
-
-        .nav-links a {
-            color: var(--muted);
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 500;
-            transition: color 0.2s;
-        }
-
-        .nav-links a:hover { color: var(--text); }
-
-        .nav-cta {
-            padding: 0.5rem 1.25rem;
-            background: var(--text);
-            color: var(--bg);
-            border: none;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, opacity 0.2s;
-            text-decoration: none;
-        }
-
-        .nav-cta:hover { transform: scale(1.03); opacity: 0.9; }
-
-        /* Hero */
-        .hero {
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 6rem 2rem 4rem;
-        }
-
-        .hero-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.4rem 1rem;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 50px;
-            font-size: 0.8rem;
-            color: var(--muted);
-            margin-bottom: 2rem;
-            opacity: 0;
-            animation: fadeUp 0.8s ease forwards 0.2s;
-        }
-
-        .hero-badge .dot {
-            width: 6px;
-            height: 6px;
-            background: var(--accent);
-            border-radius: 50%;
-            animation: pulse 2s ease-in-out infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-
-        .hero h1 {
-            font-family: 'Instrument Serif', serif;
-            font-size: clamp(3rem, 8vw, 6rem);
-            line-height: 1.05;
-            letter-spacing: -0.03em;
-            max-width: 900px;
-            opacity: 0;
-            animation: fadeUp 0.8s ease forwards 0.4s;
-        }
-
-        .hero h1 .italic {
-            font-style: italic;
-            color: var(--accent-light);
-        }
-
-        .hero p {
-            font-size: 1.15rem;
-            color: var(--muted);
-            max-width: 550px;
-            margin: 1.5rem auto 2.5rem;
-            line-height: 1.6;
-            opacity: 0;
-            animation: fadeUp 0.8s ease forwards 0.6s;
-        }
-
-        .hero-actions {
-            display: flex;
-            gap: 1rem;
-            opacity: 0;
-            animation: fadeUp 0.8s ease forwards 0.8s;
-        }
-
-        .btn-primary {
-            padding: 0.75rem 1.75rem;
-            background: var(--accent);
-            color: #000;
-            border: none;
-            border-radius: 10px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-            text-decoration: none;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 30px rgba(249, 115, 22, 0.3);
-        }
-
-        .btn-secondary {
-            padding: 0.75rem 1.75rem;
-            background: transparent;
-            color: var(--text);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            font-size: 0.95rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: border-color 0.2s;
-            text-decoration: none;
-        }
-
-        .btn-secondary:hover { border-color: var(--muted); }
-
-        /* Dashboard Preview */
-        .preview {
-            padding: 2rem;
-            max-width: 1100px;
-            margin: 0 auto;
-            opacity: 0;
-            animation: fadeUp 1s ease forwards 1s;
-        }
-
-        .dashboard-mock {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            overflow: hidden;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4);
-        }
-
-        .mock-header {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 0.75rem 1rem;
+            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+            padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between;
+            backdrop-filter: blur(16px); background: rgba(10,10,11,0.8);
             border-bottom: 1px solid var(--border);
         }
-
-        .mock-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
+        .nav-logo { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--text); text-decoration: none; }
+        .nav-logo span { color: var(--green); }
+        .nav-links { display: flex; gap: 2rem; list-style: none; }
+        .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: var(--text); }
+        .nav-status { display: flex; align-items: center; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--green); }
+        .status-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+        .hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6rem 2rem 4rem; }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.4rem 1rem; background: var(--green-dim);
+            border: 1px solid rgba(74,222,128,0.2); border-radius: 50px;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--green);
+            margin-bottom: 2.5rem; opacity: 0; animation: fadeUp .6s ease forwards .1s;
         }
-
-        .mock-dot:nth-child(1) { background: #ef4444; }
-        .mock-dot:nth-child(2) { background: #eab308; }
-        .mock-dot:nth-child(3) { background: #22c55e; }
-
-        .mock-body {
-            display: grid;
-            grid-template-columns: 200px 1fr;
-            min-height: 400px;
-        }
-
-        .mock-sidebar {
-            border-right: 1px solid var(--border);
-            padding: 1.5rem 1rem;
-        }
-
-        .mock-sidebar-item {
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
-            font-size: 0.8rem;
-            color: var(--muted);
-            margin-bottom: 0.25rem;
-        }
-
-        .mock-sidebar-item.active {
-            background: rgba(249, 115, 22, 0.1);
-            color: var(--accent);
-            font-weight: 500;
-        }
-
-        .mock-content {
-            padding: 1.5rem;
-        }
-
-        .mock-calendar {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            gap: 0.5rem;
-        }
-
-        .mock-day {
-            aspect-ratio: 1;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 8px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.75rem;
-            color: var(--muted);
-            position: relative;
-        }
-
-        .mock-day.has-post::after {
-            content: '';
-            position: absolute;
-            bottom: 6px;
-            width: 4px;
-            height: 4px;
-            background: var(--accent);
-            border-radius: 50%;
-        }
-
-        .mock-day.today {
-            border: 1px solid var(--accent);
-            color: var(--text);
-        }
-
-        /* Features */
-        .features {
-            padding: 6rem 2rem;
-            max-width: 1100px;
-            margin: 0 auto;
-        }
-
-        .section-label {
-            text-align: center;
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            color: var(--accent);
-            margin-bottom: 1rem;
-        }
-
-        .section-title {
-            font-family: 'Instrument Serif', serif;
-            font-size: clamp(2rem, 5vw, 3rem);
-            text-align: center;
-            margin-bottom: 3rem;
-            letter-spacing: -0.02em;
-        }
-
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-        }
-
-        .feature-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 2rem;
-            transition: transform 0.3s, border-color 0.3s;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-4px);
-            border-color: rgba(249, 115, 22, 0.3);
-        }
-
-        .feature-icon {
-            width: 44px;
-            height: 44px;
-            background: rgba(249, 115, 22, 0.1);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.25rem;
-            margin-bottom: 1.25rem;
-        }
-
-        .feature-card h3 {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-        }
-
-        .feature-card p {
-            color: var(--muted);
-            font-size: 0.9rem;
-            line-height: 1.6;
-        }
-
-        /* Platforms */
-        .platforms {
-            padding: 4rem 2rem 6rem;
-            text-align: center;
-        }
-
-        .platforms h2 {
-            font-family: 'Instrument Serif', serif;
-            font-size: clamp(1.5rem, 4vw, 2.5rem);
-            margin-bottom: 2rem;
-        }
-
-        .platform-icons {
-            display: flex;
-            justify-content: center;
-            gap: 2rem;
-            flex-wrap: wrap;
-        }
-
-        .platform-icon {
-            width: 56px;
-            height: 56px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            transition: transform 0.3s, border-color 0.3s;
-        }
-
-        .platform-icon:hover {
-            transform: translateY(-4px);
-            border-color: var(--accent);
-        }
-
-        /* Stats */
-        .stats {
-            padding: 4rem 2rem;
-            max-width: 900px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 2rem;
-            text-align: center;
-        }
-
-        .stat-number {
-            font-family: 'Instrument Serif', serif;
-            font-size: 3rem;
-            color: var(--accent);
-        }
-
-        .stat-label {
-            color: var(--muted);
-            font-size: 0.9rem;
-            margin-top: 0.5rem;
-        }
-
-        /* CTA */
-        .cta {
-            padding: 6rem 2rem;
-            text-align: center;
-        }
-
-        .cta-box {
-            max-width: 600px;
-            margin: 0 auto;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 24px;
-            padding: 4rem 2rem;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .cta-box::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(ellipse at center, rgba(249, 115, 22, 0.06) 0%, transparent 60%);
-            animation: bgMove 10s ease-in-out infinite alternate;
-        }
-
-        .cta-box h2 {
-            font-family: 'Instrument Serif', serif;
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            position: relative;
-        }
-
-        .cta-box p {
-            color: var(--muted);
-            margin-bottom: 2rem;
-            position: relative;
-        }
-
-        .cta-box .btn-primary {
-            position: relative;
-        }
-
-        /* Footer */
-        footer {
-            padding: 2rem;
-            text-align: center;
-            border-top: 1px solid var(--border);
-            color: var(--muted);
-            font-size: 0.85rem;
-        }
-
-        footer a {
-            color: var(--text);
-            text-decoration: none;
-        }
-
-        /* Animations */
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(24px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .reveal {
-            opacity: 0;
-            transform: translateY(30px);
-            transition: opacity 0.8s ease, transform 0.8s ease;
-        }
-
-        .reveal.visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        /* Responsive */
+        .hero-badge::before { content: '$'; opacity: .6; }
+        .hero h1 { font-size: clamp(2.5rem,7vw,5rem); font-weight: 800; letter-spacing: -.04em; line-height: 1.05; max-width: 800px; opacity: 0; animation: fadeUp .6s ease forwards .2s; }
+        .hero h1 .green { color: var(--green); }
+        .hero p { font-size: 1.1rem; color: var(--muted); max-width: 520px; margin: 1.5rem auto 2.5rem; line-height: 1.7; opacity: 0; animation: fadeUp .6s ease forwards .3s; }
+        .hero-install { display: flex; align-items: center; gap: 1rem; opacity: 0; animation: fadeUp .6s ease forwards .4s; }
+        .install-cmd { font-family: 'JetBrains Mono', monospace; font-size: .9rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1.5rem; display: flex; align-items: center; gap: .5rem; color: var(--text); }
+        .install-cmd .prompt { color: var(--green); }
+        .install-cmd .arg { color: var(--accent); }
+        .copy-btn { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1rem; color: var(--muted); cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: .8rem; transition: color .2s, border-color .2s; }
+        .copy-btn:hover { color: var(--text); border-color: var(--muted); }
+        .terminal-section { padding: 2rem; max-width: 750px; margin: 0 auto; opacity: 0; animation: fadeUp .8s ease forwards .6s; }
+        .terminal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+        .term-header { display: flex; align-items: center; justify-content: space-between; padding: .6rem 1rem; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+        .term-dots { display: flex; gap: 6px; }
+        .term-dot { width: 11px; height: 11px; border-radius: 50%; }
+        .term-dot.r { background: #ff5f57; } .term-dot.y { background: #febc2e; } .term-dot.g { background: #28c840; }
+        .term-title { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--muted); }
+        .term-body { padding: 1.25rem; font-family: 'JetBrains Mono', monospace; font-size: .85rem; line-height: 2; }
+        .term-line { display: flex; gap: .75rem; }
+        .term-line .prompt { color: var(--green); } .term-line .cmd { color: var(--text); }
+        .term-line .arg { color: var(--accent); } .term-line .flag { color: #60a5fa; }
+        .term-line .output { color: var(--muted); } .term-line .url { color: #a78bfa; }
+        .term-cursor { display: inline-block; width: 8px; height: 16px; background: var(--green); animation: blink 1s step-end infinite; vertical-align: middle; }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        .how-section { padding: 6rem 2rem; max-width: 900px; margin: 0 auto; }
+        .section-label { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--green); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 1rem; }
+        .section-title { font-size: clamp(1.8rem,4vw,2.5rem); font-weight: 700; letter-spacing: -.02em; margin-bottom: 3rem; }
+        .steps { display: flex; flex-direction: column; gap: 1.5rem; }
+        .step { display: grid; grid-template-columns: 60px 1fr; gap: 1.5rem; padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .3s; }
+        .step:hover { border-color: rgba(74,222,128,.3); }
+        .step-number { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; color: var(--green); font-weight: 700; }
+        .step-content h3 { font-size: 1rem; font-weight: 600; margin-bottom: .4rem; }
+        .step-content p { color: var(--muted); font-size: .9rem; line-height: 1.6; }
+        .step-code { font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: var(--green); margin-top: .5rem; display: inline-block; }
+        .features-section { padding: 4rem 2rem 6rem; max-width: 900px; margin: 0 auto; }
+        .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px,1fr)); gap: 1rem; }
+        .feature-card { padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .3s; }
+        .feature-card:hover { border-color: rgba(74,222,128,.2); }
+        .feature-card .icon { font-size: 1.5rem; margin-bottom: 1rem; }
+        .feature-card h3 { font-size: .95rem; font-weight: 600; margin-bottom: .4rem; }
+        .feature-card p { color: var(--muted); font-size: .85rem; line-height: 1.5; }
+        .api-section { padding: 4rem 2rem; max-width: 750px; margin: 0 auto; }
+        .api-endpoint { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; margin-bottom: 1rem; }
+        .api-method { font-family: 'JetBrains Mono', monospace; font-size: .7rem; font-weight: 600; padding: .2rem .5rem; border-radius: 4px; margin-right: .75rem; }
+        .api-method.get { background: rgba(74,222,128,.15); color: var(--green); }
+        .api-method.post { background: rgba(96,165,250,.15); color: #60a5fa; }
+        .api-path { font-family: 'JetBrains Mono', monospace; font-size: .85rem; color: var(--text); }
+        .api-desc { color: var(--muted); font-size: .85rem; margin-top: .75rem; }
+        .cta { padding: 6rem 2rem; text-align: center; }
+        .cta-box { max-width: 550px; margin: 0 auto; padding: 3.5rem 2rem; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; position: relative; overflow: hidden; }
+        .cta-box::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--green), transparent); }
+        .cta-box h2 { font-size: 2rem; font-weight: 700; margin-bottom: .75rem; }
+        .cta-box p { color: var(--muted); margin-bottom: 2rem; font-size: .95rem; }
+        .cta-cmd { font-family: 'JetBrains Mono', monospace; font-size: .9rem; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1.5rem; display: inline-flex; align-items: center; gap: .5rem; }
+        .cta-cmd .prompt { color: var(--green); } .cta-cmd .arg { color: var(--accent); }
+        footer { padding: 2rem; text-align: center; border-top: 1px solid var(--border); }
+        footer p { font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: var(--muted); }
+        footer a { color: var(--green); text-decoration: none; }
+        footer .sep { margin: 0 .5rem; opacity: .3; }
+        @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
         @media (max-width: 768px) {
             .nav-links { display: none; }
-            .mock-body { grid-template-columns: 1fr; }
-            .mock-sidebar { display: none; }
-            .hero-actions { flex-direction: column; }
-            .features-grid { grid-template-columns: 1fr; }
+            .hero-install { flex-direction: column; }
+            .step { grid-template-columns: 40px 1fr; }
+            .install-cmd { font-size: .8rem; padding: .75rem 1rem; }
         }
     </style>
 </head>
 <body>
-    <div class="bg-gradient"></div>
     <div class="grain"></div>
-
     <nav>
-        <a href="#" class="nav-logo">Post<span>Flow</span></a>
+        <a href="/" class="nav-logo">post<span>plan</span></a>
         <ul class="nav-links">
-            <li><a href="#features">Features</a></li>
-            <li><a href="#platforms">Platforms</a></li>
-            <li><a href="#cta">Get Started</a></li>
+            <li><a href="#how">How it works</a></li>
+            <li><a href="#api">API</a></li>
+            <li><a href="#docs">Docs</a></li>
         </ul>
-        <a href="#cta" class="nav-cta">Start Free</a>
+        <div class="nav-status"><span class="status-dot"></span><span>operational</span></div>
     </nav>
-
     <section class="hero">
-        <div class="hero-badge">
-            <span class="dot"></span>
-            Now in beta — join the waitlist
-        </div>
-        <h1>Schedule your social media <span class="italic">effortlessly</span></h1>
-        <p>Plan, schedule, and analyze your posts across all platforms. AI-powered timing to maximize your reach.</p>
-        <div class="hero-actions">
-            <a href="#cta" class="btn-primary">Get Early Access</a>
-            <a href="#features" class="btn-secondary">See Features</a>
+        <div class="hero-badge">cli tool v1.0</div>
+        <h1>Publish static HTML <span class="green">drafts</span> from your terminal</h1>
+        <p>A developer utility for authenticated static HTML publishing. Upload plans, reports, and pages directly from the CLI.</p>
+        <div class="hero-install">
+            <div class="install-cmd"><span class="prompt">$</span><span>npx postplan upload</span><span class="arg">./plan.html</span></div>
+            <button class="copy-btn" onclick="copyCmd()">&#x2398; copy</button>
         </div>
     </section>
-
-    <section class="preview">
-        <div class="dashboard-mock">
-            <div class="mock-header">
-                <div class="mock-dot"></div>
-                <div class="mock-dot"></div>
-                <div class="mock-dot"></div>
+    <section class="terminal-section">
+        <div class="terminal">
+            <div class="term-header">
+                <div class="term-dots"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div>
+                <span class="term-title">~/project - zsh</span>
+                <div></div>
             </div>
-            <div class="mock-body">
-                <div class="mock-sidebar">
-                    <div class="mock-sidebar-item active">📅 Calendar</div>
-                    <div class="mock-sidebar-item">📝 Posts</div>
-                    <div class="mock-sidebar-item">📊 Analytics</div>
-                    <div class="mock-sidebar-item">💡 AI Ideas</div>
-                    <div class="mock-sidebar-item">⚙️ Settings</div>
+            <div class="term-body">
+                <div class="term-line"><span class="prompt">$</span> <span class="cmd">npx postplan</span> <span class="arg">upload</span> <span class="flag">--title</span> <span>"Q4 Roadmap"</span> <span class="arg">./roadmap.html</span></div>
+                <div class="term-line"><span class="output">  &#x2713; Uploading ./roadmap.html...</span></div>
+                <div class="term-line"><span class="output">  &#x2713; Published successfully</span></div>
+                <div class="term-line"><span class="output">  &#x2192; </span><span class="url">https://postplan.dev/d/8f3k2j</span></div>
+                <div class="term-line"><span class="prompt">$</span> <span class="cmd">cat</span> <span class="arg">~/.postplan/config.json</span></div>
+                <div class="term-line"><span class="output">{ "api_url": "https://postplan.dev", "drafts": [{"id":"8f3k2j","file":"./roadmap.html"}] }</span></div>
+                <div class="term-line"><span class="prompt">$</span><span class="term-cursor"></span></div>
+            </div>
+        </div>
+    </section>
+    <section class="how-section" id="how">
+        <div class="section-label">// How it works</div>
+        <h2 class="section-title">Simple workflow, powerful results</h2>
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">01</div>
+                <div class="step-content">
+                    <h3>Upload your draft</h3>
+                    <p>Run a single command to upload any static HTML file. No build steps, no config files needed.</p>
+                    <span class="step-code">npx postplan upload ./plan.html</span>
                 </div>
-                <div class="mock-content">
-                    <div class="mock-calendar">
-                        <div class="mock-day">1</div>
-                        <div class="mock-day">2</div>
-                        <div class="mock-day has-post">3</div>
-                        <div class="mock-day">4</div>
-                        <div class="mock-day has-post">5</div>
-                        <div class="mock-day">6</div>
-                        <div class="mock-day">7</div>
-                        <div class="mock-day has-post">8</div>
-                        <div class="mock-day">9</div>
-                        <div class="mock-day">10</div>
-                        <div class="mock-day has-post">11</div>
-                        <div class="mock-day">12</div>
-                        <div class="mock-day">13</div>
-                        <div class="mock-day has-post">14</div>
-                        <div class="mock-day">15</div>
-                        <div class="mock-day">16</div>
-                        <div class="mock-day has-post">17</div>
-                        <div class="mock-day today">18</div>
-                        <div class="mock-day">19</div>
-                        <div class="mock-day">20</div>
-                        <div class="mock-day has-post">21</div>
-                        <div class="mock-day">22</div>
-                        <div class="mock-day">23</div>
-                        <div class="mock-day">24</div>
-                        <div class="mock-day has-post">25</div>
-                        <div class="mock-day">26</div>
-                        <div class="mock-day">27</div>
-                        <div class="mock-day">28</div>
-                        <div class="mock-day has-post">29</div>
-                        <div class="mock-day">30</div>
-                        <div class="mock-day">31</div>
-                    </div>
+            </div>
+            <div class="step">
+                <div class="step-number">02</div>
+                <div class="step-content">
+                    <h3>Get a public URL</h3>
+                    <p>Instantly receive a shareable URL. Your HTML is served as-is with proper content headers.</p>
+                    <span class="step-code">https://postplan.dev/d/:id</span>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-number">03</div>
+                <div class="step-content">
+                    <h3>Manage and track</h3>
+                    <p>Anonymous by default. Sign in to link drafts to your account and manage them over time. Local mappings stored in ~/.postplan.</p>
+                    <span class="step-code">npx postplan signin</span>
                 </div>
             </div>
         </div>
     </section>
-
-    <section class="features" id="features">
-        <div class="section-label">Features</div>
-        <h2 class="section-title">Everything you need to grow</h2>
+    <section class="features-section">
+        <div class="section-label">// Features</div>
+        <h2 class="section-title">Built for developers and agents</h2>
         <div class="features-grid">
-            <div class="feature-card reveal">
-                <div class="feature-icon">🗓️</div>
-                <h3>Smart Calendar</h3>
-                <p>Visual drag-and-drop calendar to plan weeks of content in minutes. See your entire strategy at a glance.</p>
-            </div>
-            <div class="feature-card reveal">
-                <div class="feature-icon">🤖</div>
-                <h3>AI Best Times</h3>
-                <p>Our AI analyzes your audience to recommend optimal posting times for maximum engagement.</p>
-            </div>
-            <div class="feature-card reveal">
-                <div class="feature-icon">📊</div>
-                <h3>Deep Analytics</h3>
-                <p>Track likes, comments, shares, and growth across all platforms in one unified dashboard.</p>
-            </div>
-            <div class="feature-card reveal">
-                <div class="feature-icon">💡</div>
-                <h3>Content Ideas</h3>
-                <p>Never run out of ideas. AI-generated post suggestions tailored to your niche and audience.</p>
-            </div>
-            <div class="feature-card reveal">
-                <div class="feature-icon">🔄</div>
-                <h3>Auto Recycle</h3>
-                <p>Set evergreen posts to republish automatically. Your best content works harder for you.</p>
-            </div>
-            <div class="feature-card reveal">
-                <div class="feature-icon">👥</div>
-                <h3>Team Collaboration</h3>
-                <p>Invite team members, assign roles, and approve posts before they go live.</p>
-            </div>
+            <div class="feature-card"><div class="icon">&#x26A1;</div><h3>Zero Config</h3><p>No setup needed. Just npx and go. Works out of the box.</p></div>
+            <div class="feature-card"><div class="icon">&#x1F512;</div><h3>Anonymous First</h3><p>Publish without an account. Sign in later to manage drafts.</p></div>
+            <div class="feature-card"><div class="icon">&#x1F4C4;</div><h3>Single File</h3><p>Upload any static HTML - plans, reports, docs, landing pages.</p></div>
+            <div class="feature-card"><div class="icon">&#x1F4BE;</div><h3>Local Mappings</h3><p>Draft IDs and metadata stored in ~/.postplan for easy reference.</p></div>
+            <div class="feature-card"><div class="icon">&#x1F916;</div><h3>Agent Friendly</h3><p>Designed for CLI-first workflows. Perfect for AI agents and automation.</p></div>
+            <div class="feature-card"><div class="icon">&#x1F3E5;</div><h3>Health Checks</h3><p>Standard /healthz endpoint for monitoring and uptime checks.</p></div>
         </div>
     </section>
-
-    <section class="platforms" id="platforms">
-        <h2>All your platforms, one tool</h2>
-        <div class="platform-icons">
-            <div class="platform-icon">𝕏</div>
-            <div class="platform-icon">📷</div>
-            <div class="platform-icon">👤</div>
-            <div class="platform-icon">💼</div>
-            <div class="platform-icon">📌</div>
-            <div class="platform-icon">🎵</div>
+    <section class="api-section" id="api">
+        <div class="section-label">// API</div>
+        <h2 class="section-title">Simple endpoints</h2>
+        <div class="api-endpoint">
+            <span class="api-method post">POST</span><span class="api-path">/api/upload</span>
+            <p class="api-desc">Upload a static HTML file. Returns a public URL with draft ID.</p>
+        </div>
+        <div class="api-endpoint">
+            <span class="api-method get">GET</span><span class="api-path">/d/:id</span>
+            <p class="api-desc">Retrieve a published draft by its unique ID.</p>
+        </div>
+        <div class="api-endpoint">
+            <span class="api-method get">GET</span><span class="api-path">/healthz</span>
+            <p class="api-desc">Service health and status check endpoint.</p>
         </div>
     </section>
-
-    <section class="stats reveal">
-        <div class="stat">
-            <div class="stat-number">12K+</div>
-            <div class="stat-label">Posts Scheduled</div>
-        </div>
-        <div class="stat">
-            <div class="stat-number">4.9</div>
-            <div class="stat-label">User Rating</div>
-        </div>
-        <div class="stat">
-            <div class="stat-number">50+</div>
-            <div class="stat-label">Countries</div>
-        </div>
-    </section>
-
-    <section class="cta" id="cta">
+    <section class="cta">
         <div class="cta-box">
-            <h2>Ready to automate?</h2>
-            <p>Join the waitlist and be first to know when we launch. No spam, ever.</p>
-            <a href="#" class="btn-primary">Join Waitlist</a>
+            <h2>Start publishing</h2>
+            <p>No signup needed. Install and upload in seconds.</p>
+            <div class="cta-cmd"><span class="prompt">$</span><span>npx postplan upload</span><span class="arg">./your-file.html</span></div>
         </div>
     </section>
-
     <footer>
-        <p>Built with ❤️ by <a href="https://github.com/10xdev4u-alt">10xdev4u-alt</a> &middot; <a href="https://github.com/10xdev4u-alt/princedotdev">Open Source</a></p>
-        <p style="margin-top: 0.5rem;">princedotdev.is-a.bot</p>
+        <p>
+            <a href="https://github.com/10xdev4u-alt">10xdev4u-alt</a>
+            <span class="sep">&bull;</span>
+            <a href="/healthz">status</a>
+            <span class="sep">&bull;</span>
+            postplan.princedotdev.is-a.bot
+        </p>
     </footer>
-
     <script>
-        // Scroll reveal
-        const reveals = document.querySelectorAll('.reveal');
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                }
-            });
-        }, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
-
-        reveals.forEach(el => observer.observe(el));
-
-        // Nav scroll effect
-        const nav = document.querySelector('nav');
-        window.addEventListener('scroll', () => {
-            nav.classList.toggle('scrolled', window.scrollY > 50);
-        });
+        function copyCmd() {
+            navigator.clipboard.writeText('npx postplan upload ./plan.html');
+            var btn = document.querySelector('.copy-btn');
+            btn.textContent = 'copied';
+            setTimeout(function(){ btn.textContent = 'copy'; }, 2000);
+        }
     </script>
 </body>
 </html>
