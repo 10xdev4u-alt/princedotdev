@@ -3,249 +3,690 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PostPlan — Static HTML Draft Publishing</title>
+    <title>PostPlan - Static HTML Draft Publishing</title>
     <style>
         :root {
-            --bg: #0a0a0b;
-            --surface: #111113;
-            --border: #1e1e22;
-            --text: #ededed;
-            --muted: #6b6b73;
-            --green: #4ade80;
-            --green-dim: rgba(74, 222, 128, 0.1);
-            --accent: #f97316;
-            --radius: 12px;
+            --bg: #fafafa;
+            --surface: #ffffff;
+            --border: #e5e5e5;
+            --text: #171717;
+            --muted: #737373;
+            --accent: #2563eb;
+            --accent-light: rgba(37, 99, 235, 0.08);
+            --green: #16a34a;
+            --radius: 14px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 40px rgba(0,0,0,0.08);
         }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
         html { scroll-behavior: smooth; }
+
         body {
-            font-family: 'Geist', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
             background: var(--bg);
             color: var(--text);
+            line-height: 1.6;
             overflow-x: hidden;
             -webkit-font-smoothing: antialiased;
         }
-        body::after {
+
+        /* Background pattern */
+        body::before {
             content: '';
             position: fixed;
             inset: 0;
-            background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+            background:
+                radial-gradient(ellipse at 30% 20%, rgba(37, 99, 235, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 60%, rgba(37, 99, 235, 0.02) 0%, transparent 50%);
             pointer-events: none;
-            z-index: 9999;
+            z-index: -1;
         }
-        .grain {
-            position: fixed; inset: 0; opacity: 0.015; z-index: -1; pointer-events: none;
-            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-        }
+
+        /* Nav */
         nav {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-            padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between;
-            backdrop-filter: blur(16px); background: rgba(10,10,11,0.8);
-            border-bottom: 1px solid var(--border);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 1rem 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(20px);
+            background: rgba(250, 250, 250, 0.85);
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.3s;
         }
-        .nav-logo { font-family: 'JetBrains Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--text); text-decoration: none; }
-        .nav-logo span { color: var(--green); }
-        .nav-links { display: flex; gap: 2rem; list-style: none; }
-        .nav-links a { color: var(--muted); text-decoration: none; font-size: 0.85rem; font-weight: 500; transition: color 0.2s; }
+
+        nav.scrolled { border-bottom-color: var(--border); }
+
+        .nav-brand {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            font-size: 1.35rem;
+            font-weight: 400;
+            color: var(--text);
+            text-decoration: none;
+            letter-spacing: -0.02em;
+        }
+
+        .nav-brand span {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2.5rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: color 0.2s;
+            letter-spacing: -0.01em;
+        }
+
         .nav-links a:hover { color: var(--text); }
-        .nav-status { display: flex; align-items: center; gap: 0.5rem; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--green); }
-        .status-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; animation: pulse 2s ease-in-out infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
-        .hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 6rem 2rem 4rem; }
-        .hero-badge {
-            display: inline-flex; align-items: center; gap: 0.5rem;
-            padding: 0.4rem 1rem; background: var(--green-dim);
-            border: 1px solid rgba(74,222,128,0.2); border-radius: 50px;
-            font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--green);
-            margin-bottom: 2.5rem; opacity: 0; animation: fadeUp .6s ease forwards .1s;
+
+        .nav-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--green);
+            font-weight: 500;
         }
-        .hero-badge::before { content: '$'; opacity: .6; }
-        .hero h1 { font-size: clamp(2.5rem,7vw,5rem); font-weight: 800; letter-spacing: -.04em; line-height: 1.05; max-width: 800px; opacity: 0; animation: fadeUp .6s ease forwards .2s; }
-        .hero h1 .green { color: var(--green); }
-        .hero p { font-size: 1.1rem; color: var(--muted); max-width: 520px; margin: 1.5rem auto 2.5rem; line-height: 1.7; opacity: 0; animation: fadeUp .6s ease forwards .3s; }
-        .hero-install { display: flex; align-items: center; gap: 1rem; opacity: 0; animation: fadeUp .6s ease forwards .4s; }
-        .install-cmd { font-family: 'JetBrains Mono', monospace; font-size: .9rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1.5rem; display: flex; align-items: center; gap: .5rem; color: var(--text); }
-        .install-cmd .prompt { color: var(--green); }
-        .install-cmd .arg { color: var(--accent); }
-        .copy-btn { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1rem; color: var(--muted); cursor: pointer; font-family: 'JetBrains Mono', monospace; font-size: .8rem; transition: color .2s, border-color .2s; }
-        .copy-btn:hover { color: var(--text); border-color: var(--muted); }
-        .terminal-section { padding: 2rem; max-width: 750px; margin: 0 auto; opacity: 0; animation: fadeUp .8s ease forwards .6s; }
-        .terminal { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
-        .term-header { display: flex; align-items: center; justify-content: space-between; padding: .6rem 1rem; border-bottom: 1px solid var(--border); background: rgba(255,255,255,.02); }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--green);
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+        /* Hero */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 8rem 2rem 4rem;
+        }
+
+        .hero-eyebrow {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--accent);
+            margin-bottom: 1.5rem;
+            opacity: 0;
+            animation: fadeUp 0.7s ease forwards 0.1s;
+        }
+
+        .hero h1 {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            font-size: clamp(2.8rem, 7vw, 5.5rem);
+            font-weight: 400;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
+            max-width: 750px;
+            margin-bottom: 1.5rem;
+            opacity: 0;
+            animation: fadeUp 0.7s ease forwards 0.2s;
+        }
+
+        .hero h1 strong {
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .hero p {
+            font-size: 1.15rem;
+            color: var(--muted);
+            max-width: 500px;
+            line-height: 1.7;
+            margin-bottom: 3rem;
+            opacity: 0;
+            animation: fadeUp 0.7s ease forwards 0.3s;
+        }
+
+        .hero-prompt {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.9rem 1.5rem;
+            box-shadow: var(--shadow);
+            opacity: 0;
+            animation: fadeUp 0.7s ease forwards 0.4s;
+        }
+
+        .prompt-symbol {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            color: var(--green);
+            font-weight: 600;
+        }
+
+        .prompt-cmd {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            color: var(--text);
+            background: none;
+            border: none;
+            outline: none;
+            width: 320px;
+        }
+
+        .prompt-cmd .arg { color: var(--accent); font-weight: 500; }
+
+        .copy-btn {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .copy-btn:hover {
+            color: var(--text);
+            border-color: var(--text);
+        }
+
+        /* Terminal Window */
+        .terminal-section {
+            padding: 2rem 2rem 4rem;
+            max-width: 700px;
+            margin: 0 auto;
+            opacity: 0;
+            animation: fadeUp 0.8s ease forwards 0.6s;
+        }
+
+        .terminal {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .term-titlebar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.7rem 1rem;
+            border-bottom: 1px solid var(--border);
+            background: rgba(0,0,0,0.01);
+        }
+
         .term-dots { display: flex; gap: 6px; }
-        .term-dot { width: 11px; height: 11px; border-radius: 50%; }
-        .term-dot.r { background: #ff5f57; } .term-dot.y { background: #febc2e; } .term-dot.g { background: #28c840; }
-        .term-title { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--muted); }
-        .term-body { padding: 1.25rem; font-family: 'JetBrains Mono', monospace; font-size: .85rem; line-height: 2; }
-        .term-line { display: flex; gap: .75rem; }
-        .term-line .prompt { color: var(--green); } .term-line .cmd { color: var(--text); }
-        .term-line .arg { color: var(--accent); } .term-line .flag { color: #60a5fa; }
-        .term-line .output { color: var(--muted); } .term-line .url { color: #a78bfa; }
-        .term-cursor { display: inline-block; width: 8px; height: 16px; background: var(--green); animation: blink 1s step-end infinite; vertical-align: middle; }
+        .term-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            opacity: 0.3;
+        }
+        .term-dot.r { background: #ef4444; }
+        .term-dot.y { background: #eab308; }
+        .term-dot.g { background: #22c55e; }
+
+        .term-label {
+            font-size: 0.75rem;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .term-body {
+            padding: 1.5rem;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.82rem;
+            line-height: 2.2;
+            overflow-x: auto;
+        }
+
+        .term-line { display: block; }
+        .t-prompt { color: var(--green); margin-right: 0.5rem; }
+        .t-cmd { color: var(--text); }
+        .t-arg { color: var(--accent); }
+        .t-flag { color: #8b5cf6; }
+        .t-output { color: var(--muted); }
+        .t-url { color: var(--accent); }
+
+        .blink {
+            display: inline-block;
+            width: 7px;
+            height: 15px;
+            background: var(--accent);
+            animation: blink 1s step-end infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+        }
+
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-        .how-section { padding: 6rem 2rem; max-width: 900px; margin: 0 auto; }
-        .section-label { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--green); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 1rem; }
-        .section-title { font-size: clamp(1.8rem,4vw,2.5rem); font-weight: 700; letter-spacing: -.02em; margin-bottom: 3rem; }
-        .steps { display: flex; flex-direction: column; gap: 1.5rem; }
-        .step { display: grid; grid-template-columns: 60px 1fr; gap: 1.5rem; padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .3s; }
-        .step:hover { border-color: rgba(74,222,128,.3); }
-        .step-number { font-family: 'JetBrains Mono', monospace; font-size: 1.5rem; color: var(--green); font-weight: 700; }
-        .step-content h3 { font-size: 1rem; font-weight: 600; margin-bottom: .4rem; }
-        .step-content p { color: var(--muted); font-size: .9rem; line-height: 1.6; }
-        .step-code { font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: var(--green); margin-top: .5rem; display: inline-block; }
-        .features-section { padding: 4rem 2rem 6rem; max-width: 900px; margin: 0 auto; }
-        .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px,1fr)); gap: 1rem; }
-        .feature-card { padding: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .3s; }
-        .feature-card:hover { border-color: rgba(74,222,128,.2); }
-        .feature-card .icon { font-size: 1.5rem; margin-bottom: 1rem; }
-        .feature-card h3 { font-size: .95rem; font-weight: 600; margin-bottom: .4rem; }
-        .feature-card p { color: var(--muted); font-size: .85rem; line-height: 1.5; }
-        .api-section { padding: 4rem 2rem; max-width: 750px; margin: 0 auto; }
-        .api-endpoint { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; margin-bottom: 1rem; }
-        .api-method { font-family: 'JetBrains Mono', monospace; font-size: .7rem; font-weight: 600; padding: .2rem .5rem; border-radius: 4px; margin-right: .75rem; }
-        .api-method.get { background: rgba(74,222,128,.15); color: var(--green); }
-        .api-method.post { background: rgba(96,165,250,.15); color: #60a5fa; }
-        .api-path { font-family: 'JetBrains Mono', monospace; font-size: .85rem; color: var(--text); }
-        .api-desc { color: var(--muted); font-size: .85rem; margin-top: .75rem; }
-        .cta { padding: 6rem 2rem; text-align: center; }
-        .cta-box { max-width: 550px; margin: 0 auto; padding: 3.5rem 2rem; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; position: relative; overflow: hidden; }
-        .cta-box::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--green), transparent); }
-        .cta-box h2 { font-size: 2rem; font-weight: 700; margin-bottom: .75rem; }
-        .cta-box p { color: var(--muted); margin-bottom: 2rem; font-size: .95rem; }
-        .cta-cmd { font-family: 'JetBrains Mono', monospace; font-size: .9rem; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: .85rem 1.5rem; display: inline-flex; align-items: center; gap: .5rem; }
-        .cta-cmd .prompt { color: var(--green); } .cta-cmd .arg { color: var(--accent); }
-        footer { padding: 2rem; text-align: center; border-top: 1px solid var(--border); }
-        footer p { font-family: 'JetBrains Mono', monospace; font-size: .8rem; color: var(--muted); }
-        footer a { color: var(--green); text-decoration: none; }
-        footer .sep { margin: 0 .5rem; opacity: .3; }
-        @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+
+        /* Steps */
+        .steps-section {
+            padding: 6rem 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .section-eyebrow {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+        }
+
+        .section-heading {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            font-size: clamp(1.8rem, 4vw, 2.5rem);
+            font-weight: 400;
+            letter-spacing: -0.02em;
+            margin-bottom: 3rem;
+        }
+
+        .steps-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .step-item {
+            display: grid;
+            grid-template-columns: 50px 1fr;
+            gap: 2rem;
+            padding: 2rem 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .step-item:last-child { border-bottom: 1px solid var(--border); }
+
+        .step-num {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            color: var(--muted);
+            font-weight: 500;
+            padding-top: 0.2rem;
+        }
+
+        .step-body h3 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+            letter-spacing: -0.01em;
+        }
+
+        .step-body p {
+            color: var(--muted);
+            font-size: 0.925rem;
+            line-height: 1.6;
+            max-width: 500px;
+        }
+
+        .step-code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.78rem;
+            color: var(--accent);
+            margin-top: 0.6rem;
+            display: inline-block;
+        }
+
+        /* Features */
+        .features-section {
+            padding: 4rem 2rem 6rem;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            padding: 1.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            transition: box-shadow 0.3s, transform 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .feature-card h3 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-card p {
+            color: var(--muted);
+            font-size: 0.875rem;
+            line-height: 1.6;
+        }
+
+        /* API */
+        .api-section {
+            padding: 4rem 2rem;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .api-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .api-row {
+            display: flex;
+            align-items: center;
+            padding: 1.25rem 0;
+            border-top: 1px solid var(--border);
+            gap: 1.5rem;
+        }
+
+        .api-row:last-child { border-bottom: 1px solid var(--border); }
+
+        .api-method {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 0.25rem 0.6rem;
+            border-radius: 5px;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .api-method.get { background: rgba(22, 163, 74, 0.1); color: var(--green); }
+        .api-method.post { background: rgba(37, 99, 235, 0.1); color: var(--accent); }
+
+        .api-path {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85rem;
+            color: var(--text);
+            flex-shrink: 0;
+        }
+
+        .api-desc {
+            color: var(--muted);
+            font-size: 0.85rem;
+            text-align: right;
+            margin-left: auto;
+        }
+
+        /* CTA */
+        .cta {
+            padding: 6rem 2rem 8rem;
+            text-align: center;
+        }
+
+        .cta-inner {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .cta h2 {
+            font-family: 'Georgia', 'Times New Roman', serif;
+            font-size: 2.2rem;
+            font-weight: 400;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.75rem;
+        }
+
+        .cta p {
+            color: var(--muted);
+            font-size: 1rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .cta-prompt {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.85rem 1.5rem;
+            box-shadow: var(--shadow);
+        }
+
+        .cta-prompt .prompt-symbol { font-weight: 600; }
+        .cta-prompt .prompt-text {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.88rem;
+            color: var(--text);
+        }
+        .cta-prompt .arg { color: var(--accent); }
+
+        /* Footer */
+        footer {
+            padding: 2.5rem;
+            text-align: center;
+            border-top: 1px solid var(--border);
+        }
+
+        footer p {
+            font-size: 0.8rem;
+            color: var(--muted);
+        }
+
+        footer a {
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        footer a:hover { color: var(--accent); }
+
+        footer .divider { margin: 0 0.5rem; opacity: 0.4; }
+
+        /* Animations */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(24px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Responsive */
         @media (max-width: 768px) {
             .nav-links { display: none; }
-            .hero-install { flex-direction: column; }
-            .step { grid-template-columns: 40px 1fr; }
-            .install-cmd { font-size: .8rem; padding: .75rem 1rem; }
+            .hero { padding: 6rem 1.5rem 3rem; }
+            .hero h1 { font-size: 2.5rem; }
+            .prompt-cmd { width: 200px; font-size: 0.8rem; }
+            .step-item { grid-template-columns: 40px 1fr; gap: 1rem; }
+            .api-row { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+            .api-desc { text-align: left; margin-left: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="grain"></div>
     <nav>
-        <a href="/" class="nav-logo">post<span>plan</span></a>
+        <a href="/" class="nav-brand">Post<span>Plan</span></a>
         <ul class="nav-links">
             <li><a href="#how">How it works</a></li>
             <li><a href="#api">API</a></li>
-            <li><a href="#docs">Docs</a></li>
+            <li><a href="#start">Get started</a></li>
         </ul>
-        <div class="nav-status"><span class="status-dot"></span><span>operational</span></div>
+        <div class="nav-status">
+            <span class="status-dot"></span>
+            <span>All systems operational</span>
+        </div>
     </nav>
+
     <section class="hero">
-        <div class="hero-badge">cli tool v1.0</div>
-        <h1>Publish static HTML <span class="green">drafts</span> from your terminal</h1>
-        <p>A developer utility for authenticated static HTML publishing. Upload plans, reports, and pages directly from the CLI.</p>
-        <div class="hero-install">
-            <div class="install-cmd"><span class="prompt">$</span><span>npx postplan upload</span><span class="arg">./plan.html</span></div>
-            <button class="copy-btn" >&#x2398; copy</button>
+        <div class="hero-eyebrow">Developer CLI Tool</div>
+        <h1>Publish static HTML <strong>drafts</strong> from your terminal</h1>
+        <p>A lightweight developer utility for authenticated static HTML publishing. Upload plans, reports, and pages directly from the command line.</p>
+        <div class="hero-prompt">
+            <span class="prompt-symbol">$</span>
+            <span class="prompt-cmd">npx postplan upload <span class="arg">./plan.html</span></span>
+            <button class="copy-btn" id="copyBtn">Copy</button>
         </div>
     </section>
+
     <section class="terminal-section">
         <div class="terminal">
-            <div class="term-header">
-                <div class="term-dots"><div class="term-dot r"></div><div class="term-dot y"></div><div class="term-dot g"></div></div>
-                <span class="term-title">~/project - zsh</span>
+            <div class="term-titlebar">
+                <div class="term-dots">
+                    <div class="term-dot r"></div>
+                    <div class="term-dot y"></div>
+                    <div class="term-dot g"></div>
+                </div>
+                <span class="term-label">terminal</span>
                 <div></div>
             </div>
             <div class="term-body">
-                <div class="term-line"><span class="prompt">$</span> <span class="cmd">npx postplan</span> <span class="arg">upload</span> <span class="flag">--title</span> <span>"Q4 Roadmap"</span> <span class="arg">./roadmap.html</span></div>
-                <div class="term-line"><span class="output">  &#x2713; Uploading ./roadmap.html...</span></div>
-                <div class="term-line"><span class="output">  &#x2713; Published successfully</span></div>
-                <div class="term-line"><span class="output">  &#x2192; </span><span class="url">https://postplan.dev/d/8f3k2j</span></div>
-                <div class="term-line"><span class="prompt">$</span> <span class="cmd">cat</span> <span class="arg">~/.postplan/config.json</span></div>
-                <div class="term-line"><span class="output">{ "api_url": "https://postplan.dev", "drafts": [{"id":"8f3k2j","file":"./roadmap.html"}] }</span></div>
-                <div class="term-line"><span class="prompt">$</span><span class="term-cursor"></span></div>
+                <span class="term-line"><span class="t-prompt">$</span><span class="t-cmd">npx postplan</span> <span class="t-arg">upload</span> <span class="t-flag">--title</span> "Q4 Roadmap" <span class="t-arg">./roadmap.html</span></span>
+                <span class="term-line"><span class="t-output">  Uploading ./roadmap.html...</span></span>
+                <span class="term-line"><span class="t-output">  Published successfully</span></span>
+                <span class="term-line"><span class="t-output">  </span><span class="t-url">https://postplan.dev/d/8f3k2j</span></span>
+                <span class="term-line"><span class="t-prompt">$</span><span class="t-cmd">cat</span> <span class="t-arg">~/.postplan/drafts.json</span></span>
+                <span class="term-line"><span class="t-output">  {"drafts":[{"id":"8f3k2j","file":"./roadmap.html"}]}</span></span>
+                <span class="term-line"><span class="t-prompt">$</span><span class="blink"></span></span>
             </div>
         </div>
     </section>
-    <section class="how-section" id="how">
-        <div class="section-label">// How it works</div>
-        <h2 class="section-title">Simple workflow, powerful results</h2>
-        <div class="steps">
-            <div class="step">
-                <div class="step-number">01</div>
-                <div class="step-content">
+
+    <section class="steps-section" id="how">
+        <div class="section-eyebrow">How it works</div>
+        <h2 class="section-heading">Three steps to publish</h2>
+        <div class="steps-list">
+            <div class="step-item">
+                <div class="step-num">01</div>
+                <div class="step-body">
                     <h3>Upload your draft</h3>
-                    <p>Run a single command to upload any static HTML file. No build steps, no config files needed.</p>
+                    <p>Run a single command to upload any static HTML file. No build steps, no configuration files needed.</p>
                     <span class="step-code">npx postplan upload ./plan.html</span>
                 </div>
             </div>
-            <div class="step">
-                <div class="step-number">02</div>
-                <div class="step-content">
+            <div class="step-item">
+                <div class="step-num">02</div>
+                <div class="step-body">
                     <h3>Get a public URL</h3>
                     <p>Instantly receive a shareable URL. Your HTML is served as-is with proper content headers.</p>
                     <span class="step-code">https://postplan.dev/d/:id</span>
                 </div>
             </div>
-            <div class="step">
-                <div class="step-number">03</div>
-                <div class="step-content">
+            <div class="step-item">
+                <div class="step-num">03</div>
+                <div class="step-body">
                     <h3>Manage and track</h3>
-                    <p>Anonymous by default. Sign in to link drafts to your account and manage them over time. Local mappings stored in ~/.postplan.</p>
+                    <p>Anonymous by default. Sign in later to link drafts to your account. Local mappings stored in ~/.postplan.</p>
                     <span class="step-code">npx postplan signin</span>
                 </div>
             </div>
         </div>
     </section>
+
     <section class="features-section">
-        <div class="section-label">// Features</div>
-        <h2 class="section-title">Built for developers and agents</h2>
+        <div class="section-eyebrow">Features</div>
+        <h2 class="section-heading">Built for developers and agents</h2>
         <div class="features-grid">
-            <div class="feature-card"><div class="icon">&#x26A1;</div><h3>Zero Config</h3><p>No setup needed. Just npx and go. Works out of the box.</p></div>
-            <div class="feature-card"><div class="icon">&#x1F512;</div><h3>Anonymous First</h3><p>Publish without an account. Sign in later to manage drafts.</p></div>
-            <div class="feature-card"><div class="icon">&#x1F4C4;</div><h3>Single File</h3><p>Upload any static HTML - plans, reports, docs, landing pages.</p></div>
-            <div class="feature-card"><div class="icon">&#x1F4BE;</div><h3>Local Mappings</h3><p>Draft IDs and metadata stored in ~/.postplan for easy reference.</p></div>
-            <div class="feature-card"><div class="icon">&#x1F916;</div><h3>Agent Friendly</h3><p>Designed for CLI-first workflows. Perfect for AI agents and automation.</p></div>
-            <div class="feature-card"><div class="icon">&#x1F3E5;</div><h3>Health Checks</h3><p>Standard /healthz endpoint for monitoring and uptime checks.</p></div>
+            <div class="feature-card">
+                <h3>Zero Config</h3>
+                <p>No setup needed. Just npx and go. Works out of the box.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Anonymous First</h3>
+                <p>Publish without an account. Sign in later to manage your drafts.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Single File</h3>
+                <p>Upload any static HTML - plans, reports, docs, landing pages.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Local Mappings</h3>
+                <p>Draft IDs and metadata stored in ~/.postplan for easy reference.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Agent Friendly</h3>
+                <p>Designed for CLI-first workflows. Perfect for AI agents and automation.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Health Checks</h3>
+                <p>Standard /healthz endpoint for monitoring and uptime verification.</p>
+            </div>
         </div>
     </section>
+
     <section class="api-section" id="api">
-        <div class="section-label">// API</div>
-        <h2 class="section-title">Simple endpoints</h2>
-        <div class="api-endpoint">
-            <span class="api-method post">POST</span><span class="api-path">/api/upload</span>
-            <p class="api-desc">Upload a static HTML file. Returns a public URL with draft ID.</p>
-        </div>
-        <div class="api-endpoint">
-            <span class="api-method get">GET</span><span class="api-path">/d/:id</span>
-            <p class="api-desc">Retrieve a published draft by its unique ID.</p>
-        </div>
-        <div class="api-endpoint">
-            <span class="api-method get">GET</span><span class="api-path">/healthz</span>
-            <p class="api-desc">Service health and status check endpoint.</p>
+        <div class="section-eyebrow">API</div>
+        <h2 class="section-heading">Simple endpoints</h2>
+        <div class="api-list">
+            <div class="api-row">
+                <span class="api-method post">POST</span>
+                <span class="api-path">/api/upload</span>
+                <span class="api-desc">Upload HTML, get a public URL</span>
+            </div>
+            <div class="api-row">
+                <span class="api-method get">GET</span>
+                <span class="api-path">/d/:id</span>
+                <span class="api-desc">Retrieve a published draft</span>
+            </div>
+            <div class="api-row">
+                <span class="api-method get">GET</span>
+                <span class="api-path">/healthz</span>
+                <span class="api-desc">Service health check</span>
+            </div>
         </div>
     </section>
-    <section class="cta">
-        <div class="cta-box">
+
+    <section class="cta" id="start">
+        <div class="cta-inner">
             <h2>Start publishing</h2>
             <p>No signup needed. Install and upload in seconds.</p>
-            <div class="cta-cmd"><span class="prompt">$</span><span>npx postplan upload</span><span class="arg">./your-file.html</span></div>
+            <div class="cta-prompt">
+                <span class="prompt-symbol">$</span>
+                <span class="prompt-text">npx postplan upload <span class="arg">./your-file.html</span></span>
+            </div>
         </div>
     </section>
+
     <footer>
         <p>
             <a href="https://github.com/10xdev4u-alt">10xdev4u-alt</a>
-            <span class="sep">&bull;</span>
-            <a href="/healthz">status</a>
-            <span class="sep">&bull;</span>
+            <span class="divider">/</span>
+            <a href="/healthz">Status</a>
+            <span class="divider">/</span>
             postplan.princedotdev.is-a.bot
         </p>
     </footer>
+
     <script>
-        function copyCmd() {
+        document.getElementById('copyBtn').addEventListener('click', function() {
             navigator.clipboard.writeText('npx postplan upload ./plan.html');
-            var btn = document.querySelector('.copy-btn');
-            btn.textContent = 'copied';
-            setTimeout(function(){ btn.textContent = 'copy'; }, 2000);
-        }
+            this.textContent = 'Copied';
+            setTimeout(() => { this.textContent = 'Copy'; }, 2000);
+        });
+
+        // Nav scroll
+        window.addEventListener('scroll', () => {
+            document.querySelector('nav').classList.toggle('scrolled', window.scrollY > 50);
+        });
     </script>
 </body>
 </html>
