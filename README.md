@@ -46,6 +46,34 @@ Environment:
 | `SESSION_SECRET` | — | Enables dashboard sign-in + key minting |
 | `MAX_HTML_BYTES` | `524288` | Upload size cap |
 
+## Data & backups (consistency)
+
+Data lives in `DATA_DIR` (default `./data`, `/data` in the container on a
+named volume) — SQLite (`draftdeck.db`) plus the draft HTML files. Updates are
+safe because the volume outlives containers:
+
+- **`docker compose up -d` with a new image** — the named volume persists; the
+  schema migrates additively (`CREATE TABLE IF NOT EXISTS`), so old data + new
+  code always work together.
+- **SQLite is in WAL mode** with a 5s busy timeout — readers never block the
+  writer, and concurrent container traffic won't throw `SQLITE_BUSY`.
+- **Crash tolerance** — an upload writes the HTML file, then the version row,
+  then flips the current-version pointer. A crash between steps leaves an
+  orphan file/row at worst, never a half-visible draft.
+- **Consistent snapshots** — `draftdeck backup <dest.db>` takes an online
+  backup (`VACUUM INTO`) safe to run while the server is live; restore is
+  `cp backup.db /data/draftdeck.db` + restart. On graceful shutdown the WAL is
+  checkpointed so the `.db` file alone is always a complete snapshot.
+- **`draftdeck check`** verifies the DB opens and the schema is intact — use
+  it in a cron/init script before starting the container.
+
+```bash
+# inside the container or against a stopped volume:
+draftdeck backup /backup/draftdeck-$(date +%F).db
+# schedule it: docker run --rm -v draftdeck-data:/data -v backups:/backup \
+#   ghcr.io/10xdev4u-alt/princedotdev backup /backup/$(date +%F).db
+```
+
 ## The workflow
 
 ```bash

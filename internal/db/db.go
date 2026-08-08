@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -159,6 +160,24 @@ func (d *DB) ensureSentinel() error {
 func (d *DB) Ping() error {
 	var one int
 	return d.sql.QueryRow("SELECT 1").Scan(&one)
+}
+
+// Checkpoint flushes the WAL into the main database file (TRUNCATE mode), so
+// the .db file on disk is a complete, consistent snapshot. Called on graceful
+// shutdown and before backups.
+func (d *DB) Checkpoint() error {
+	_, err := d.sql.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	return err
+}
+
+// Backup writes a consistent online snapshot of the database to dest using
+// VACUUM INTO — safe to run while the server is live (WAL readers/writers
+// keep working; the snapshot is transactionally consistent). The destination
+// must not already exist.
+func (d *DB) Backup(dest string) error {
+	escaped := strings.ReplaceAll(dest, "'", "''")
+	_, err := d.sql.Exec("VACUUM INTO '" + escaped + "'")
+	return err
 }
 
 // Close closes the underlying handle.
