@@ -298,6 +298,62 @@ export function createApp() {
     }
   });
 
+  // ---- API: teams -------------------------------------------------------------
+
+  app.get("/api/teams", requireAuth, (req, res, next) => {
+    try {
+      res.json({ ok: true, teams: listTeamsForAccount(req.auth.account_id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/teams", requireAuth, (req, res, next) => {
+    try {
+      const name = cleanText(req.body?.name, 100);
+      if (!name) return res.status(400).json({ ok: false, error: "Team name is required." });
+      const team = createTeam(name, req.auth.account_id);
+      res.status(201).json({ ok: true, team });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/teams/:teamId", requireAuth, (req, res, next) => {
+    try {
+      const team = findTeam(req.params.teamId);
+      if (!team) return res.status(404).json({ ok: false, error: "Team not found." });
+      if (!isTeamMember(team.id, req.auth.account_id)) {
+        return res.status(403).json({ ok: false, error: "You're not a member of that team." });
+      }
+      res.json({ ok: true, team, drafts: listTeamDrafts(team.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Add a member by email: for the MVP this just registers the email and the
+  // account claims it on first sign-in with that email (see web sign-in).
+  app.post("/api/teams/:teamId/members", requireAuth, (req, res, next) => {
+    try {
+      const team = findTeam(req.params.teamId);
+      if (!team) return res.status(404).json({ ok: false, error: "Team not found." });
+      if (!isTeamOwner(team.id, req.auth.account_id)) {
+        return res.status(403).json({ ok: false, error: "Only team owners can add members." });
+      }
+      const email = cleanText(req.body?.email, 200)?.toLowerCase();
+      if (!email) return res.status(400).json({ ok: false, error: "Member email is required." });
+      const account = getDb().prepare("SELECT * FROM accounts WHERE lower(email) = ?").get(email);
+      if (!account) {
+        return res.status(404).json({ ok: false, error: "No account with that email yet — they must create one first (npm run user:create)." });
+      }
+      addTeamMember(team.id, account.id);
+      res.status(201).json({ ok: true, member: { accountId: account.id, name: account.name, email: account.email } });
+    } catch (error) {
+      next(error);
+    }
+  });
+
 
   // ---- Draft serving ----------------------------------------------------------
   // The raw HTML contract: /d/<id> and /d/<id>/raw serve the exact uploaded
@@ -318,6 +374,12 @@ export function createApp() {
 
       if (!version) return notFound(res);
 
+      if (draft.visibility === "team") {
+        const auth = await optionalAuth(req);
+        if (!auth || !isTeamMember(draft.team_id, auth.account_id)) {
+          return res.status(401).type("html").send(renderNeedAuth());
+        }
+      }
 
       const html = getHtmlObject(version.object_key);
       res.setHeader("Content-Security-Policy", draftCsp());
