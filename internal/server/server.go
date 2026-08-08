@@ -48,6 +48,10 @@ func New(cfg config.Config) (*Server, error) {
 // Close releases the database handle.
 func (s *Server) Close() error { return s.db.Close() }
 
+// Checkpoint flushes the WAL into the main database file (used on graceful
+// shutdown so volume snapshots are complete).
+func (s *Server) Checkpoint() error { return s.db.Checkpoint() }
+
 // Handler returns the HTTP handler for the whole service.
 func (s *Server) Handler() http.Handler { return s.mux }
 
