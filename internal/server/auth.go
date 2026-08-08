@@ -30,6 +30,19 @@ func (s *Server) optionalAuth(r *http.Request) (*db.APIKey, error) {
 	return s.db.FindAPIKeyByToken(token)
 }
 
+// optionalAuthMiddleware resolves a key if present (anonymous when absent),
+// attaching it to the request context for the handler.
+func (s *Server) optionalAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key, err := s.optionalAuth(r)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+			return
+		}
+		next(w, withAuth(r, key))
+	}
+}
+
 // requireAuth rejects the request with 401 unless a valid key is present.
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
