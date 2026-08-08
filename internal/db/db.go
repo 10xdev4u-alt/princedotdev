@@ -243,9 +243,9 @@ func (d *DB) ListAPIKeys(accountID string) ([]APIKey, error) {
 
 // Team is a shared workspace for a group of accounts.
 type Team struct {
-	ID        string
-	Name      string
-	CreatedAt string
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"createdAt"`
 }
 
 // CreateTeam makes a team owned by accountID.
@@ -292,6 +292,62 @@ func (d *DB) IsTeamMember(teamID, accountID string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// IsTeamOwner reports whether accountID owns teamID (role 'owner').
+func (d *DB) IsTeamOwner(teamID, accountID string) (bool, error) {
+	var one int
+	err := d.sql.QueryRow(
+		`SELECT 1 FROM team_members WHERE team_id = ? AND account_id = ? AND role = 'owner'`,
+		teamID, accountID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// ListTeamDrafts returns the team's drafts (never deleted), newest first.
+func (d *DB) ListTeamDrafts(teamID string) ([]DraftListItem, error) {
+	rows, err := d.sql.Query(`
+		SELECT dr.id, dr.title, COALESCE(dr.description,''), dr.visibility, dr.status,
+		       COALESCE(dr.team_id,''), COALESCE(dr.repo_org,''), COALESCE(dr.repo_name,''),
+		       COALESCE(cv.version_number,0), COALESCE(vc.version_count,0),
+		       dr.created_at, dr.updated_at
+		FROM drafts dr
+		LEFT JOIN draft_versions cv ON cv.id = dr.current_version_id
+		LEFT JOIN (SELECT draft_id, COUNT(*) AS version_count FROM draft_versions GROUP BY draft_id) vc
+		       ON vc.draft_id = dr.id
+		WHERE dr.team_id = ? AND dr.deleted_at IS NULL
+		ORDER BY dr.updated_at DESC`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DraftListItem
+	for rows.Next() {
+		var it DraftListItem
+		if err := rows.Scan(&it.DraftID, &it.Title, &it.Description, &it.Visibility, &it.Status,
+			&it.TeamID, &it.RepoOrg, &it.RepoName, &it.LatestVersionNumber, &it.VersionCount,
+			&it.CreatedAt, &it.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// FindAccountByEmail returns an account by exact (lowercased) email, or nil.
+func (d *DB) FindAccountByEmail(email string) (*Account, error) {
+	row := d.sql.QueryRow(`SELECT id, name, COALESCE(email,'') FROM accounts WHERE lower(email) = ?`, lowercase(email))
+	var a Account
+	err := row.Scan(&a.ID, &a.Name, &a.Email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
 }
 
 // ListTeamsForAccount lists the teams an account belongs to.
