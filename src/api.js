@@ -30,6 +30,7 @@ import {
   createApiKey
 } from "./db.js";
 import { renderHome, renderNotFound } from "./render.js";
+import { registerWebRoutes, readSession } from "./web.js";
 
 const STATUSES = new Set(["draft", "in_review", "changes_requested", "approved"]);
 const VISIBILITIES = new Set(["public", "unlisted", "team"]);
@@ -354,6 +355,7 @@ export function createApp() {
     }
   });
 
+  registerWebRoutes(app);
 
   // ---- Draft serving ----------------------------------------------------------
   // The raw HTML contract: /d/<id> and /d/<id>/raw serve the exact uploaded
@@ -376,7 +378,9 @@ export function createApp() {
 
       if (draft.visibility === "team") {
         const auth = await optionalAuth(req);
-        if (!auth || !isTeamMember(draft.team_id, auth.account_id)) {
+        const session = readSession(req);
+        const accountId = auth?.account_id || session?.accountId;
+        if (!accountId || !isTeamMember(draft.team_id, accountId)) {
           return res.status(401).type("html").send(renderNeedAuth());
         }
       }
