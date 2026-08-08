@@ -1,0 +1,19 @@
+services:
+  draftdeck:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SESSION_SECRET: ${SESSION_SECRET:-dev-only-change-me}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+      STORAGE_BUDGET_BYTES: ${STORAGE_BUDGET_BYTES:-5368709120}
+    volumes:
+      - draftdeck-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  draftdeck-data:

@@ -1,0 +1,13 @@
+# Keep the Go build context small: exclude Node artifacts, data, and git.
+data/
+node_modules/
+.git/
+*.log
+test/
+bin/
+scripts/
+package.json
+package-lock.json
+README.md
+PLAN.md
+GO-REWRITE-PLAN.md
