@@ -1,0 +1,300 @@
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/10xdev4u-alt/princedotdev/internal/config"
+	"github.com/10xdev4u-alt/princedotdev/internal/db"
+)
+
+// newTestServer boots a full server on a temp data dir (5 GiB budget default).
+func newTestServer(t *testing.T, mutate func(*config.Config)) (*Server, *db.DB, string) {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := config.Config{
+		Port:                    "0",
+		DataDir:                 dir,
+		PublicBaseURL:           "http://test.local",
+		SessionSecret:           "test-secret",
+		MaxHTMLBytes:            512 * 1024,
+		StorageBudget:           5 * 1024 * 1024 * 1024,
+		UploadRateLimitMax:      1000,
+		UploadRateLimitWindowMs: 60000,
+	}
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s, s.db, dir
+}
+
+func doJSON(t *testing.T, h http.Handler, method, path string, body any, token string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = bytes.NewReader(b)
+	}
+	req := httptest.NewRequest(method, path, rdr)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec, out
+}
+
+func doRaw(t *testing.T, h http.Handler, method, path string, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+const testHTML = "<!doctype html><html><head><title>Plan</title></head><body><h1>v1</h1></body></html>"
+
+func TestUploadServeVersioning(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+
+	// healthz
+	if rec := doRaw(t, h, "GET", "/healthz", ""); rec.Code != 200 {
+		t.Fatalf("healthz %d", rec.Code)
+	}
+
+	// anonymous upload
+	rec, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "plan.html"}, "")
+	if rec.Code != 201 {
+		t.Fatalf("upload %d: %s", rec.Code, rec.Body.String())
+	}
+	draftID := up["draftId"].(string)
+	if up["versionNumber"].(float64) != 1 {
+		t.Fatalf("v1 expected, got %v", up["versionNumber"])
+	}
+
+	// raw byte-for-byte
+	rec2 := doRaw(t, h, "GET", "/d/"+draftID+"/raw", "")
+	if rec2.Code != 200 || rec2.Body.String() != testHTML {
+		t.Fatalf("raw mismatch: %d %q", rec2.Code, rec2.Body.String())
+	}
+	if csp := rec2.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'none'") {
+		t.Fatalf("missing CSP: %q", csp)
+	}
+
+	// versioned re-upload
+	html2 := "<html><head><title>Plan v2</title></head><body><h1>v2</h1></body></html>"
+	rec3, up2 := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": html2, "draftId": draftID}, "")
+	if rec3.Code != 200 || up2["versionNumber"].(float64) != 2 {
+		t.Fatalf("v2 %d %v", rec3.Code, up2)
+	}
+	if rec := doRaw(t, h, "GET", "/d/"+draftID+"/v/2/raw", ""); rec.Body.String() != html2 {
+		t.Fatal("v2 raw mismatch")
+	}
+
+	// 404s
+	if rec := doRaw(t, h, "GET", "/d/doesnotexist", ""); rec.Code != 404 {
+		t.Fatalf("missing draft %d", rec.Code)
+	}
+	_ = d
+}
+
+func TestPolicyReject(t *testing.T) {
+	s, _, _ := newTestServer(t, nil)
+	rec, out := doJSON(t, s.Handler(), "POST", "/api/uploads", map[string]any{
+		"html": `<html><body><iframe src="x"></iframe><script src="https://evil.dev/a.js"></script></body></html>`,
+	}, "")
+	if rec.Code != 422 {
+		t.Fatalf("expected 422, got %d", rec.Code)
+	}
+	errs, _ := out["errors"].([]any)
+	if len(errs) != 2 {
+		t.Fatalf("expected 2 errors, got %v", errs)
+	}
+}
+
+func TestAuthRequired(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	if rec := doRaw(t, h, "GET", "/api/me", ""); rec.Code != 401 {
+		t.Fatalf("me without key %d", rec.Code)
+	}
+	id, err := d.CreateAccount("Maya", "maya@team.dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := d.CreateAPIKey(id, "cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, out := doJSON(t, h, "GET", "/api/me", nil, token)
+	if rec.Code != 200 || out["accountName"] != "Maya" {
+		t.Fatalf("me with key %d %v", rec.Code, out)
+	}
+}
+
+func TestCommentsAndStatus(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "p.html"}, token)
+	draftID := up["draftId"].(string)
+
+	// comment flips to in_review
+	rec, c := doJSON(t, h, "POST", "/api/drafts/"+draftID+"/comments",
+		map[string]any{"body": "make the heading bigger", "anchor": map[string]any{"selector": "h1"}}, token)
+	if rec.Code != 201 || c["comment"].(map[string]any)["author"] != "Maya" {
+		t.Fatalf("comment %d %v", rec.Code, c)
+	}
+	_, detail := doJSON(t, h, "GET", "/api/drafts/"+draftID, nil, token)
+	if detail["draft"].(map[string]any)["status"] != "in_review" {
+		t.Fatal("expected in_review after comment")
+	}
+
+	// approve
+	_, st := doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, token)
+	if st["draft"].(map[string]any)["status"] != "approved" {
+		t.Fatal("expected approved")
+	}
+
+	// re-upload after approval resets to draft (persisted)
+	_, up2 := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "draftId": draftID}, token)
+	if up2["status"] != "draft" {
+		t.Fatalf("status reset expected draft, got %v", up2["status"])
+	}
+	_, detail2 := doJSON(t, h, "GET", "/api/drafts/"+draftID, nil, token)
+	if detail2["draft"].(map[string]any)["status"] != "draft" {
+		t.Fatal("status reset not persisted")
+	}
+
+	// invalid status rejected
+	if rec := doJSON2(t, h, draftID, token); rec.Code != 400 {
+		t.Fatalf("invalid status %d", rec.Code)
+	}
+
+	// comments readable anonymously for non-team drafts
+	if rec := doRaw(t, h, "GET", "/api/drafts/"+draftID+"/comments", ""); rec.Code != 200 {
+		t.Fatalf("anon comments %d", rec.Code)
+	}
+}
+
+func doJSON2(t *testing.T, h http.Handler, draftID, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec, _ := doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "banana"}, token)
+	return rec
+}
+
+func TestTeamsPrivacy(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	maya, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, mayaTok, _ := d.CreateAPIKey(maya, "cli")
+	ben, _ := d.CreateAccount("Ben", "ben@team.dev")
+	_, benTok, _ := d.CreateAPIKey(ben, "cli")
+
+	_, team := doJSON(t, h, "POST", "/api/teams", map[string]any{"name": "Eng"}, mayaTok)
+	teamID := team["team"].(map[string]any)["id"].(string)
+
+	// team draft upload + privacy
+	_, up := doJSON(t, h, "POST", "/api/uploads",
+		map[string]any{"html": testHTML, "teamId": teamID, "visibility": "team"}, mayaTok)
+	draftID := up["draftId"].(string)
+
+	if rec := doRaw(t, h, "GET", "/d/"+draftID+"/raw", benTok); rec.Code != 401 {
+		t.Fatalf("non-member team raw %d", rec.Code)
+	}
+	// anonymous team upload rejected
+	if rec, _ := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "teamId": teamID}, ""); rec.Code != 401 {
+		t.Fatalf("anon team upload %d", rec.Code)
+	}
+
+	// add member, then ben can read
+	if rec, _ := doJSON(t, h, "POST", "/api/teams/"+teamID+"/members", map[string]any{"email": "ben@team.dev"}, mayaTok); rec.Code != 201 {
+		t.Fatalf("add member %d", rec.Code)
+	}
+	if rec := doRaw(t, h, "GET", "/d/"+draftID+"/raw", benTok); rec.Code != 200 {
+		t.Fatalf("member team raw %d", rec.Code)
+	}
+	// non-owner cannot add members
+	if rec, _ := doJSON(t, h, "POST", "/api/teams/"+teamID+"/members", map[string]any{"email": "x@y.dev"}, benTok); rec.Code != 403 {
+		t.Fatalf("non-owner add %d", rec.Code)
+	}
+}
+
+func TestStorageBudget(t *testing.T) {
+	s, d, _ := newTestServer(t, func(c *config.Config) { c.StorageBudget = 2048 })
+	h := s.Handler()
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+
+	if rec, _ := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": "<html><body>small</body></html>"}, token); rec.Code != 201 {
+		t.Fatalf("small upload %d", rec.Code)
+	}
+	big := "<html><body>" + strings.Repeat("x", 5000) + "</body></html>"
+	if rec, _ := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": big}, token); rec.Code != 507 {
+		t.Fatalf("over-budget %d", rec.Code)
+	}
+}
+
+func TestBackupRestore(t *testing.T) {
+	s, d, dir := newTestServer(t, nil)
+	h := s.Handler()
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+	doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "p.html"}, token)
+
+	// live backup (server still running)
+	backupPath := filepath.Join(dir, "snapshot.db")
+	if err := d.Backup(backupPath); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+
+	// restore into a fresh instance
+	restoreDir := t.TempDir()
+	raw, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(restoreDir, "draftdeck.db"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := New(config.Config{
+		DataDir:       restoreDir,
+		PublicBaseURL: "http://restored.local",
+		StorageBudget: 5 * 1024 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	rec, out := doJSON(t, s2.Handler(), "GET", "/api/me", nil, token)
+	if rec.Code != 200 || out["accountName"] != "Maya" {
+		t.Fatalf("restored auth %d %v", rec.Code, out)
+	}
+	_, drafts := doJSON(t, s2.Handler(), "GET", "/api/drafts", nil, token)
+	if len(drafts["drafts"].([]any)) != 1 {
+		t.Fatalf("restored drafts %v", drafts)
+	}
+}
