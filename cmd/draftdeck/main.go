@@ -15,6 +15,7 @@ import (
 
 	"github.com/10xdev4u-alt/princedotdev/internal/config"
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
+	"github.com/10xdev4u-alt/princedotdev/internal/mcp"
 	"github.com/10xdev4u-alt/princedotdev/internal/server"
 )
 
@@ -38,6 +39,19 @@ func main() {
 			os.Exit(runCheck())
 		case "user:create", "create-user":
 			os.Exit(runCreateUser(args[1:]))
+		case "mcp":
+			// MCP stdio server: `docker exec -i <c> draftdeck mcp` or a local
+			// binary, wired to Claude Code via `claude mcp add draftdeck -- …`.
+			apiURL := os.Getenv("DRAFTDECK_API_URL")
+			if apiURL == "" {
+				apiURL = config.Load().PublicBaseURL
+			}
+			srv := mcp.New(apiURL, os.Getenv("DRAFTDECK_API_KEY"))
+			if err := srv.Run(os.Stdin, os.Stdout); err != nil {
+				log.Printf("draftdeck mcp: %v", err)
+				os.Exit(1)
+			}
+			return
 		case "serve":
 			// fall through to serve below
 		case "help", "-h", "--help":
