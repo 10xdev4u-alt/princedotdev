@@ -1,137 +1,138 @@
 # draftdeck
 
-Agent-published HTML draft sharing with **team review**: versioned drafts, a
-byte-for-byte `/raw` contract for agents, anchored comments, and an
-approve/request-changes workflow. Built after a deep study of
-[postplan.dev](https://postplan.dev) — same HTML-first philosophy, plus the
-team layer postplan lacks.
+Agent-published HTML drafts with team review. An agent writes a plan as a
+standalone HTML file, publishes it, and the team reviews it — comments,
+approvals, and revisions, all anchored to exact versions.
 
-**Why HTML?** Coding agents already emit self-contained HTML. Serving it
-byte-for-byte means a human sees the exact rendered document in a browser
-while another agent (or CI) can `curl <url>/raw` and pull the artifact back
-out. Markdown would only add a lossy conversion step.
+- **HTML is the contract** — drafts are stored and served byte-for-byte. Browsers render them; agents `curl` the `/raw` URL and pull structured data back.
+- **Versioned** — every re-upload of the same draft becomes `v2, v3…` with full git provenance (branch, SHA, subject, dirty state).
+- **Team review** — private team drafts, anchored comments, and a `draft → in_review → changes_requested → approved` workflow that the agent can drive via the API.
+- **Single static Go binary** — server, CLI, and backup tool in one ~15 MB binary. SQLite embedded (WAL mode, no CGO). Runs anywhere Docker runs.
 
-## Run it
+## Run it (Docker, recommended)
 
 ```bash
-npm install
-npm start                 # listens on http://localhost:4000
+docker run -d --name draftdeck -p 8080:8080 \
+  -e SESSION_SECRET=$(openssl rand -hex 32) \
+  -v draftdeck-data:/data \
+  ghcr.io/10xdev4u-alt/princedotdev:latest
 ```
 
-Then create your first account + API key:
+Or with compose (healthcheck + named volume included):
 
 ```bash
-npm run user:create -- --name "Maya" --email maya@team.dev
+docker compose up -d
 ```
 
-Point the CLI at it and save the key:
+The image is published to **ghcr.io/10xdev4u-alt/princedotdev** (`:latest`,
+plus `:v0.1.0` etc.) by the CI workflow on every push / tag.
+
+### Run it from source
 
 ```bash
-DRAFTDECK_API_URL=http://localhost:4000 node bin/draftdeck.js auth set <dd_...>
-```
-
-Enable the web dashboard (paste-a-key sign-in, drafts list, comment/approve UI):
-
-```bash
-SESSION_SECRET=<random-string> npm start
+go run ./cmd/draftdeck                 # server on :8080
+go build -o draftdeck ./cmd/draftdeck  # single binary
+draftdeck serve                        # default command
 ```
 
 Environment:
 
 | Var | Default | Purpose |
 |---|---|---|
-| `PORT` | `4000` | HTTP port |
-| `DATA_DIR` | `./data` | SQLite db + draft HTML files |
-| `PUBLIC_BASE_URL` | `http://localhost:4000` | Base used in generated URLs |
+| `PORT` | `8080` | HTTP port |
+| `DATA_DIR` | `./data` | SQLite db + draft HTML files (volume `/data` in the container) |
+| `PUBLIC_BASE_URL` | `http://localhost:8080` | Base used in generated URLs |
 | `SESSION_SECRET` | — | Enables dashboard sign-in + key minting |
-| `MAX_HTML_BYTES` | `524288` | Upload size cap |
-
-## Data & backups (consistency)
-
-Data lives in `DATA_DIR` (default `./data`, `/data` in the container on a
-named volume) — SQLite (`draftdeck.db`) plus the draft HTML files. Updates are
-safe because the volume outlives containers:
-
-- **`docker compose up -d` with a new image** — the named volume persists; the
-  schema migrates additively (`CREATE TABLE IF NOT EXISTS`), so old data + new
-  code always work together.
-- **SQLite is in WAL mode** with a 5s busy timeout — readers never block the
-  writer, and concurrent container traffic won't throw `SQLITE_BUSY`.
-- **Crash tolerance** — an upload writes the HTML file, then the version row,
-  then flips the current-version pointer. A crash between steps leaves an
-  orphan file/row at worst, never a half-visible draft.
-- **Consistent snapshots** — `draftdeck backup <dest.db>` takes an online
-  backup (`VACUUM INTO`) safe to run while the server is live; restore is
-  `cp backup.db /data/draftdeck.db` + restart. On graceful shutdown the WAL is
-  checkpointed so the `.db` file alone is always a complete snapshot.
-- **`draftdeck check`** verifies the DB opens and the schema is intact — use
-  it in a cron/init script before starting the container.
-
-```bash
-# inside the container or against a stopped volume:
-draftdeck backup /backup/draftdeck-$(date +%F).db
-# schedule it: docker run --rm -v draftdeck-data:/data -v backups:/backup \
-#   ghcr.io/10xdev4u-alt/princedotdev backup /backup/$(date +%F).db
-```
+| `STORAGE_BUDGET_BYTES` | `5368709120` (5 GiB) | Total stored HTML cap; over-budget uploads get 507 |
+| `MAX_HTML_BYTES` | `524288` | Per-upload size cap |
+| `UPLOAD_RATE_LIMIT_MAX` | `30` | Uploads per key/IP per window |
 
 ## The workflow
 
 ```bash
 # 1. An agent writes a plan as standalone HTML, then publishes it:
-node bin/draftdeck.js upload ./plan.html --description "Q3 plan"
+npx draftdeck upload ./plan.html --description "Q3 plan"
+#    Uploaded draft
+#    URL: http://localhost:8080/d/abc123def456
+#    Raw HTML: http://localhost:8080/d/abc123def456/raw
 
-# 2. Agent (or anyone) opens the URL; a teammate reviews it:
-node bin/draftdeck.js comments <draft-id> --post "Clarify the d+12 window" --selector "#phase-2"
-node bin/draftdeck.js status <draft-id> in_review
+# 2. A teammate reviews it — comments, approve, or request changes:
+npx draftdeck comments abc123def456 --post "Add a migration section" --selector "h1"
+npx draftdeck status abc123def456 approved
 
-# 3. The agent pulls the feedback back (JSON), edits, re-uploads:
-curl <url>/raw                          # exact bytes, for agents
-node bin/draftdeck.js comments <draft-id>   # the feedback channel
-node bin/draftdeck.js upload ./plan.html    # bumps to v2, resets status
-node bin/draftdeck.js status <draft-id> approved
+# 3. The agent pulls the feedback back as JSON, edits, re-uploads (→ v2):
+curl http://localhost:8080/api/drafts/abc123def456/comments
+npx draftdeck upload ./plan.html
 ```
+
+## CLI
+
+The npx client (`npx draftdeck …`) downloads the native binary from GitHub
+Releases on first run and caches it — no install step. `draftdeck` commands:
+
+| Command | Purpose |
+|---|---|
+| `auth set <key>` / `auth whoami` | Save / verify credentials |
+| `upload <file>` | Publish or update (re-upload versions the same draft) |
+| `list` | Drafts with status, versions, time-ago (`--json` for agents) |
+| `comments <id>` | Read feedback, or `--post "…" --selector "h1"` to leave it |
+| `status <id> <status>` | `draft \| in_review \| changes_requested \| approved` |
+| `teams` / `teams create --name X` / `teams members --team T --email E` | Shared workspaces |
+
+State lives in `~/.draftdeck/`; env overrides: `DRAFTDECK_API_URL`,
+`DRAFTDECK_API_KEY`, `DRAFTDECK_HOME`, `DRAFTDECK_CACHE`, `DRAFTDECK_BIN_BASE`.
+
+## Web dashboard
+
+`SESSION_SECRET` enables `/dashboard`: paste-an-API-key sign-in (sessions are
+HMAC-signed cookies), the drafts list with status filters, draft detail with
+version history + comment thread + Approve/Request-changes buttons, and the
+CLI setup page that mints keys. Nord-palette, server-rendered, no JS build.
 
 ## API
 
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/uploads` | optional | Upload/update HTML (`html`, `filename`, `draftId?`, `description?`, `visibility?`, `teamId?`) |
-| GET | `/d/:id`, `/d/:id/raw`, `/d/:id/v/:n/raw` | team drafts only | Serve exact bytes (CSP + draft headers) |
-| GET | `/api/drafts` | key | List your drafts + team drafts |
-| GET | `/api/drafts/:id` | key | Detail: metadata + versions + comments |
-| GET | `/api/drafts/:id/comments` | optional | Pull comments (the agent feedback channel) |
-| POST | `/api/drafts/:id/comments` | key | Post anchored comment (`body`, `anchor?`, `versionNumber?`) |
-| POST | `/api/drafts/:id/status` | key | `draft` / `in_review` / `changes_requested` / `approved` |
-| DELETE | `/api/drafts/:id` | key | Soft-delete |
-| POST | `/api/teams` | key | Create a team |
-| GET | `/api/teams/:id` | key | Team + its drafts |
-| POST | `/api/teams/:id/members` | key (owner) | Add member by email |
+`POST /api/uploads` (anonymous or `Authorization: Bearer dd_…`), `GET /d/{id}`
+and `/d/{id}/raw` (byte-for-byte with a hard CSP + draft headers),
+`/api/drafts` (list/detail/comments/status), `/api/teams` (+members),
+`/api/me`. All JSON responses are `{ ok, … }`; errors carry `{ ok: false, error }`.
 
-**Visibility:** `public` (listed + open), `unlisted` (random URL, open — the
-default), `team` (only authenticated team members can view/edit; anonymous
-requests get 401).
+## Data & backups (consistency)
 
-**HTML policy (upload-time):** static HTML + inline CSS only. Blocked: external
-`<script src>`, forms, iframes/embeds/objects, inline event handlers,
-`javascript:` URLs, meta-refresh. Served with a strict CSP
-(`script-src 'none'` etc.) so even allowed inline scripts can't exfiltrate.
+See the full model in `PLAN.md`. In short: SQLite in WAL mode with a 5 s busy
+timeout; the container keeps data on a named volume so image updates never
+touch it; uploads are crash-tolerant (file → version row → pointer, orphans at
+worst); and consistent online snapshots are one command:
+
+```bash
+draftdeck backup /backup/draftdeck-$(date +%F).db   # live, VACUUM INTO
+draftdeck check                                     # integrity probe
+```
+
+## Security
+
+Uploads are validated against a strict policy (no forms/iframes/embeds,
+no external scripts or `on*` handlers, no JS URLs, no meta-refresh — inline
+classic `<script>` and inline CSS allowed), and drafts are served with
+`script-src 'none'` CSP on isolated per-draft origins. Team drafts are
+member-only; anonymous uploads are unlisted and unowned.
 
 ## Tests
 
 ```bash
-npm test    # boots the real server, 7 end-to-end tests
+go test ./...   # policy, db, and full httptest API suite (upload/raw/versioning/
+                # privacy/comments/status/budget/backup-restore)
 ```
 
 ## Layout
 
 ```
-bin/draftdeck.js      CLI (upload, list, comments, status, teams, auth)
-src/api.js            Express app: API + draft serving
-src/web.js            Dashboard routes (paste-a-key sign-in, key minting)
-src/db.js             SQLite schema + data access (node:sqlite, zero deps)
-src/html-policy.js    Upload-time validation
-src/storage.js        Filesystem object store (S3-shaped keys)
-src/render*.js        Server-rendered pages (no build step)
-scripts/create-user.js  Bootstrap accounts + keys
-test/api.test.js      End-to-end tests
+cmd/draftdeck        server (serve | backup | check subcommands)
+cmd/draftdeck-cli    the CLI (npx distributes this binary)
+internal/db          SQLite (WAL), schema, migrations, backup
+internal/policy      upload-time HTML security policy
+internal/server      HTTP API + draft serving + rate limiting
+internal/web         session cookies + nordic dashboard (html/template)
+internal/store       filesystem object store (S3-shaped keys)
+npx/                 the npm bootstrap (downloads the native binary)
+.github/workflows    test + release binaries + publish container to GHCR
 ```
