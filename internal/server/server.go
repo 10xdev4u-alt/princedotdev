@@ -65,6 +65,12 @@ func (s *Server) routes() {
 	m.Handle("POST /api/drafts/{draftId}/status", s.requireAuth(s.handleSetStatus))
 	m.Handle("DELETE /api/drafts/{draftId}", s.requireAuth(s.handleDeleteDraft))
 
+	// Teams
+	m.Handle("GET /api/teams", s.requireAuth(s.handleListTeams))
+	m.Handle("POST /api/teams", s.requireAuth(s.handleCreateTeam))
+	m.Handle("GET /api/teams/{teamId}", s.requireAuth(s.handleTeamDetail))
+	m.Handle("POST /api/teams/{teamId}/members", s.requireAuth(s.handleAddTeamMember))
+
 	// Uploads (anonymous allowed; auth resolved before rate limiting so the
 	// limiter can key on the API key when present).
 	m.Handle("POST /api/uploads", s.optionalAuthMiddleware(s.httpRateLimit(s.handleUpload, func(r *http.Request) string {

@@ -151,6 +151,21 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		created = true
 	}
 
+	// Storage budget guard: reject uploads that would push stored HTML past
+	// the configured budget (default 5 GiB) before touching disk or DB.
+	stored, err := s.db.SumStoredBytes()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
+	if stored+int64(len(req.HTML)) > s.cfg.StorageBudget {
+		writeJSON(w, http.StatusInsufficientStorage, map[string]any{
+			"ok":    false,
+			"error": "Storage budget exceeded. Delete old drafts or raise STORAGE_BUDGET_BYTES.",
+		})
+		return
+	}
+
 	versionID := versionIDPref + randomID(20)
 	objectKey := "drafts/" + draft.ID + "/versions/" + versionID + ".html"
 	if err := s.store.Put(objectKey, []byte(req.HTML)); err != nil {
