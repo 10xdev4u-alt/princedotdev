@@ -216,6 +216,74 @@ export function createApp() {
 
   // ---- API: comments --------------------------------------------------------
 
+  app.get("/api/drafts/:draftId/comments", optionalAuthMiddleware, (req, res, next) => {
+    try {
+      const draft = findDraft(req.params.draftId);
+      if (!draft || draft.deleted_at) return res.status(404).json({ ok: false, error: "Draft not found." });
+      if (draft.visibility === "team" && !(req.auth && isTeamMember(draft.team_id, req.auth.account_id))) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this draft." });
+      }
+      const detail = getDraftDetail(draft.id);
+      res.json({ ok: true, comments: detail.comments.map(decorateComment) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post("/api/drafts/:draftId/comments", requireAuth, (req, res, next) => {
+    try {
+      const draft = findDraft(req.params.draftId);
+      if (!draft || draft.deleted_at) return res.status(404).json({ ok: false, error: "Draft not found." });
+      if (draft.visibility === "team" && !isTeamMember(draft.team_id, req.auth.account_id)) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this draft." });
+      }
+
+      const body = cleanText(req.body?.body, 4000);
+      if (!body) return res.status(400).json({ ok: false, error: "Comment body is required." });
+
+      const current = getCurrentVersion(draft.id);
+      const anchor = sanitizeAnchor(req.body?.anchor);
+      const versionNumber = Number(req.body?.versionNumber) || Number(current?.version_number) || 1;
+
+      const comment = addComment({
+        draftId: draft.id,
+        versionNumber,
+        anchor,
+        body,
+        author: req.auth.account_name || "Anonymous"
+      });
+
+      // A new comment on a non-approved draft returns it to review.
+      if (draft.status !== "approved") {
+        setDraftStatus(draft.id, "in_review");
+      }
+
+      res.status(201).json({ ok: true, comment: decorateComment(comment) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // ---- API: status workflow --------------------------------------------------
+
+  app.post("/api/drafts/:draftId/status", requireAuth, (req, res, next) => {
+    try {
+      const draft = findDraft(req.params.draftId);
+      if (!draft || draft.deleted_at) return res.status(404).json({ ok: false, error: "Draft not found." });
+      if (!canAccess(draft, req.auth)) {
+        return res.status(403).json({ ok: false, error: "You don't have access to this draft." });
+      }
+      const status = req.body?.status;
+      if (!STATUSES.has(status)) {
+        return res.status(400).json({ ok: false, error: `Invalid status "${status}".` });
+      }
+      const updated = setDraftStatus(draft.id, status);
+      res.json({ ok: true, draft: decorateDraft(updated) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.delete("/api/drafts/:draftId", requireAuth, (req, res, next) => {
     try {
       const draft = findDraft(req.params.draftId);
