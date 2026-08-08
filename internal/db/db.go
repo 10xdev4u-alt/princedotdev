@@ -155,6 +155,12 @@ func (d *DB) ensureSentinel() error {
 	return err
 }
 
+// Ping verifies the database is reachable (healthz).
+func (d *DB) Ping() error {
+	var one int
+	return d.sql.QueryRow("SELECT 1").Scan(&one)
+}
+
 // Close closes the underlying handle.
 func (d *DB) Close() error { return d.sql.Close() }
 
