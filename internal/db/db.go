@@ -179,6 +179,8 @@ type APIKey struct {
 	AccountID   string
 	Name        string
 	AccountName string
+	CreatedAt   string
+	LastUsedAt  string
 }
 
 // CreateAccount inserts an account and returns its id.
@@ -222,8 +224,8 @@ func (d *DB) FindAPIKeyByToken(token string) (*APIKey, error) {
 // ListAPIKeys lists non-revoked keys for an account.
 func (d *DB) ListAPIKeys(accountID string) ([]APIKey, error) {
 	rows, err := d.sql.Query(
-		`SELECT id, account_id, name, '' AS account_name FROM api_keys
-		 WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`, accountID)
+		`SELECT id, account_id, name, '' AS account_name, COALESCE(created_at,''), COALESCE(last_used_at,'')
+		 FROM api_keys WHERE account_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +233,7 @@ func (d *DB) ListAPIKeys(accountID string) ([]APIKey, error) {
 	var out []APIKey
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.ID, &k.AccountID, &k.Name, &k.AccountName); err != nil {
+		if err := rows.Scan(&k.ID, &k.AccountID, &k.Name, &k.AccountName, &k.CreatedAt, &k.LastUsedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, k)

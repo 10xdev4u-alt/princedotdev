@@ -15,11 +15,12 @@ import (
 
 // Server wires the store, database, and HTTP routes together.
 type Server struct {
-	cfg   config.Config
-	db    *db.DB
-	store *store.Store
-	rl    *rateLimiter
-	mux   *http.ServeMux
+	cfg       config.Config
+	db        *db.DB
+	store     *store.Store
+	rl        *rateLimiter
+	dashboard *web.DashboardHandler
+	mux       *http.ServeMux
 }
 
 // New opens the database + store and builds the route table.
@@ -32,6 +33,7 @@ func New(cfg config.Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	web.Init(cfg.PublicBaseURL)
 	s := &Server{
 		cfg:   cfg,
 		db:    d,
@@ -85,6 +87,12 @@ func (s *Server) routes() {
 	m.Handle("GET /d/{draftId}/raw", s.noStore(s.handleServe()))
 	m.Handle("GET /d/{draftId}/v/{versionNumber}", s.noStore(s.handleServe()))
 	m.Handle("GET /d/{draftId}/v/{versionNumber}/raw", s.noStore(s.handleServe()))
+
+	// Web dashboard (session-gated); register only when SESSION_SECRET is set.
+	s.dashboard = web.NewDashboard(s.cfg.SessionSecret, s.db)
+	if s.dashboard.Enabled() {
+		s.dashboard.Routes(m)
+	}
 }
 
 // noStore sets security + caching headers on every response.
