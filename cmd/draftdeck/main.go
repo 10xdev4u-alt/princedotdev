@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -35,13 +36,15 @@ func main() {
 			os.Exit(runBackup(args[1]))
 		case "check":
 			os.Exit(runCheck())
+		case "user:create", "create-user":
+			os.Exit(runCreateUser(args[1:]))
 		case "serve":
 			// fall through to serve below
 		case "help", "-h", "--help":
-			fmt.Println("usage: draftdeck [serve | backup <dest.db> | check]")
+			fmt.Println("usage: draftdeck [serve | user:create --name X --email Y | backup <dest.db> | check]")
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "unknown command: %s (try: serve | backup <dest.db> | check)\n", args[0])
+			fmt.Fprintf(os.Stderr, "unknown command: %s (try: serve | user:create | backup <dest.db> | check)\n", args[0])
 			os.Exit(1)
 		}
 	}
@@ -114,5 +117,42 @@ func runCheck() int {
 		return 1
 	}
 	log.Printf("database OK at %s", cfg.DataDir)
+	return 0
+}
+
+// runCreateUser bootstraps the first account: creates it and prints a fresh
+// API key (shown once). This is how you onboard before any session exists.
+func runCreateUser(args []string) int {
+	fs := flag.NewFlagSet("user:create", flag.ContinueOnError)
+	name := fs.String("name", "", "Account name")
+	email := fs.String("email", "", "Account email")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintln(os.Stderr, "usage: draftdeck user:create --name X --email Y")
+		return 1
+	}
+	if *name == "" {
+		fmt.Fprintln(os.Stderr, "--name is required")
+		return 1
+	}
+	cfg := config.Load()
+	d, err := db.Open(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "user:create: %v\n", err)
+		return 1
+	}
+	defer d.Close()
+	id, err := d.CreateAccount(*name, *email)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "user:create: %v\n", err)
+		return 1
+	}
+	_, token, err := d.CreateAPIKey(id, "CLI · "+time.Now().UTC().Format("2006-01-02"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "user:create: %v\n", err)
+		return 1
+	}
+	fmt.Printf("account: %s (%s)\n", *name, id)
+	fmt.Printf("api key: %s\n", token)
+	fmt.Println("save it now — it is shown only once. Paste it into the dashboard sign-in.")
 	return 0
 }
