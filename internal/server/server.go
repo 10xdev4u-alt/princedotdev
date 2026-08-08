@@ -57,13 +57,22 @@ func (s *Server) routes() {
 	// Identity
 	m.Handle("GET /api/me", s.requireAuth(s.handleMe))
 
-	// Uploads (anonymous allowed)
-	m.Handle("POST /api/uploads", s.httpRateLimit(s.handleUpload, func(r *http.Request) string {
+	// Drafts: list, detail, comments, review status
+	m.Handle("GET /api/drafts", s.requireAuth(s.handleListDrafts))
+	m.Handle("GET /api/drafts/{draftId}", s.requireAuth(s.handleDraftDetail))
+	m.Handle("GET /api/drafts/{draftId}/comments", s.noStore(http.HandlerFunc(s.handleListComments)))
+	m.Handle("POST /api/drafts/{draftId}/comments", s.requireAuth(s.handleAddComment))
+	m.Handle("POST /api/drafts/{draftId}/status", s.requireAuth(s.handleSetStatus))
+	m.Handle("DELETE /api/drafts/{draftId}", s.requireAuth(s.handleDeleteDraft))
+
+	// Uploads (anonymous allowed; auth resolved before rate limiting so the
+	// limiter can key on the API key when present).
+	m.Handle("POST /api/uploads", s.optionalAuthMiddleware(s.httpRateLimit(s.handleUpload, func(r *http.Request) string {
 		if k := authFrom(r); k != nil {
 			return "upload:" + k.ID
 		}
 		return "upload:" + clientIP(r)
-	}))
+	})))
 
 	// Draft serving: byte-for-byte raw HTML to every client.
 	m.Handle("GET /d/{draftId}", s.noStore(s.handleServe()))
