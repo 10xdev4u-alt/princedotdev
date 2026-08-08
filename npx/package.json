@@ -1,0 +1,23 @@
+{
+  "name": "draftdeck",
+  "version": "0.1.0",
+  "description": "Publish static HTML drafts and manage team review — zero-dependency npx client.",
+  "license": "MIT",
+  "bin": {
+    "draftdeck": "bin/draftdeck.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "drafts",
+    "html",
+    "agents",
+    "cli",
+    "review",
+    "teams"
+  ]
+}
