@@ -277,6 +277,7 @@ func decorateVersions(versions []db.Version) []map[string]any {
 			"gitDirty":         v.GitDirty,
 			"originalFilename": nullStr(v.OriginalFilename),
 			"cliVersion":       nullStr(v.CLIVersion),
+			"author":           nullStr(v.Author),
 		})
 	}
 	return out
