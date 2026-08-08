@@ -2,7 +2,10 @@ module github.com/10xdev4u-alt/princedotdev
 
 go 1.25.0
 
-require modernc.org/sqlite v1.56.0
+require (
+	golang.org/x/net v0.57.0
+	modernc.org/sqlite v1.56.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
