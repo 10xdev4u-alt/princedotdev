@@ -82,6 +82,22 @@ Releases on first run and caches it — no install step. `draftdeck` commands:
 State lives in `~/.draftdeck/`; env overrides: `DRAFTDECK_API_URL`,
 `DRAFTDECK_API_KEY`, `DRAFTDECK_HOME`, `DRAFTDECK_CACHE`, `DRAFTDECK_BIN_BASE`.
 
+## MCP server (agents)
+
+`draftdeck mcp` speaks the Model Context Protocol over stdio, so Claude Code /
+Codebuff can publish drafts and drive review natively — no curl:
+
+```bash
+# against the running container:
+claude mcp add draftdeck -- docker exec -i dd-local draftdeck mcp
+# or a local binary:
+DRAFTDECK_API_URL=http://localhost:8080 DRAFTDECK_API_KEY=dd_… draftdeck mcp
+```
+
+Tools: `upload_draft`, `list_drafts`, `get_draft`, `list_comments`,
+`post_comment`, `set_status`, `list_teams`. The upload validates HTML with the
+same policy the server enforces.
+
 ## Web dashboard
 
 `SESSION_SECRET` enables `/dashboard`: paste-an-API-key sign-in (sessions are
