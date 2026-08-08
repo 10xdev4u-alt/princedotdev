@@ -14,6 +14,7 @@ import (
 
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
 	"github.com/10xdev4u-alt/princedotdev/internal/policy"
+	"github.com/10xdev4u-alt/princedotdev/internal/web"
 )
 
 const (
@@ -273,10 +274,23 @@ func (s *Server) handleServe() http.HandlerFunc {
 		if draft.Visibility == "team" {
 			key, _ := s.optionalAuth(r)
 			if key == nil || !s.canAccess(draft, key) {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.WriteHeader(http.StatusUnauthorized)
-				_, _ = w.Write([]byte(needAuthHTML))
-				return
+				// Web sessions count too: a signed-in team member viewing a
+				// team draft in the dashboard must not hit the API-key gate.
+				session := web.ReadSession(r, s.cfg.SessionSecret)
+				member := false
+				if session != nil {
+					member, err = s.db.IsTeamMember(draft.TeamID, session.AccountID)
+					if err != nil {
+						writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+						return
+					}
+				}
+				if !member {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+					w.WriteHeader(http.StatusUnauthorized)
+					_, _ = w.Write([]byte(needAuthHTML))
+					return
+				}
 			}
 		}
 
