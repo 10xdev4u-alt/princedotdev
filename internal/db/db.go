@@ -426,6 +426,8 @@ type Version struct {
 	GitDirty         bool
 	OriginalFilename string
 	CLIVersion       string
+	// Author is the publishing account name (audit trail, joined in).
+	Author string
 }
 
 // Comment is a comment row.
@@ -591,10 +593,14 @@ func scanVersion(row *sql.Row) (*Version, error) {
 // ListVersions lists all versions of a draft, newest first.
 func (d *DB) ListVersions(draftID string) ([]Version, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, draft_id, version_number, object_key, content_hash, file_size, created_at,
-		       COALESCE(git_branch,''), COALESCE(git_commit_sha,''), COALESCE(git_commit_subject,''),
-		       COALESCE(git_dirty,0), COALESCE(original_filename,''), COALESCE(cli_version,'')
-		FROM draft_versions WHERE draft_id = ? ORDER BY version_number DESC`, draftID)
+		SELECT v.id, v.draft_id, v.version_number, v.object_key, v.content_hash, v.file_size, v.created_at,
+		       COALESCE(v.git_branch,''), COALESCE(v.git_commit_sha,''), COALESCE(v.git_commit_subject,''),
+		       COALESCE(v.git_dirty,0), COALESCE(v.original_filename,''), COALESCE(v.cli_version,''),
+		       COALESCE(a.name,'')
+		FROM draft_versions v
+		LEFT JOIN api_keys k ON k.id = v.created_by_api_key_id
+		LEFT JOIN accounts a ON a.id = k.account_id
+		WHERE v.draft_id = ? ORDER BY v.version_number DESC`, draftID)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +611,7 @@ func (d *DB) ListVersions(draftID string) ([]Version, error) {
 		var dirty int
 		if err := rows.Scan(&v.ID, &v.DraftID, &v.VersionNumber, &v.ObjectKey, &v.ContentHash, &v.FileSize,
 			&v.CreatedAt, &v.GitBranch, &v.GitCommitSHA, &v.GitCommitSubject, &dirty,
-			&v.OriginalFilename, &v.CLIVersion); err != nil {
+			&v.OriginalFilename, &v.CLIVersion, &v.Author); err != nil {
 			return nil, err
 		}
 		v.GitDirty = dirty != 0
@@ -637,6 +643,86 @@ func (d *DB) SumStoredBytes() (int64, error) {
 		JOIN drafts dr ON dr.id = v.draft_id
 		WHERE dr.deleted_at IS NULL`).Scan(&n)
 	return n, err
+}
+
+// Stats is the control-panel overview.
+type Stats struct {
+	StoredBytes  int64 `json:"storedBytes"`
+	DraftCount   int64 `json:"draftCount"`
+	VersionCount int64 `json:"versionCount"`
+	CommentCount int64 `json:"commentCount"`
+	AccountCount int64 `json:"accountCount"`
+	TeamCount    int64 `json:"teamCount"`
+}
+
+// Stats returns instance-wide totals (control panel / storage meter).
+func (d *DB) Stats() (Stats, error) {
+	var s Stats
+	if err := d.sql.QueryRow(`SELECT COALESCE(SUM(v.file_size),0) FROM draft_versions v
+		JOIN drafts dr ON dr.id = v.draft_id WHERE dr.deleted_at IS NULL`).Scan(&s.StoredBytes); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM drafts WHERE deleted_at IS NULL`).Scan(&s.DraftCount); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM draft_versions`).Scan(&s.VersionCount); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM comments`).Scan(&s.CommentCount); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM accounts`).Scan(&s.AccountCount); err != nil {
+		return s, err
+	}
+	if err := d.sql.QueryRow(`SELECT COUNT(*) FROM teams`).Scan(&s.TeamCount); err != nil {
+		return s, err
+	}
+	return s, nil
+}
+
+// RevokeAPIKey revokes a key owned by accountID (no-op for other accounts).
+func (d *DB) RevokeAPIKey(keyID, accountID string) error {
+	_, err := d.sql.Exec(
+		`UPDATE api_keys SET revoked_at = datetime('now') WHERE id = ? AND account_id = ?`,
+		keyID, accountID)
+	return err
+}
+
+// TeamMember is a member row joined with the account.
+type TeamMember struct {
+	AccountID string `json:"accountId"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+}
+
+// ListTeamMembers lists members of a team.
+func (d *DB) ListTeamMembers(teamID string) ([]TeamMember, error) {
+	rows, err := d.sql.Query(`
+		SELECT tm.account_id, a.name, COALESCE(a.email,''), tm.role
+		FROM team_members tm JOIN accounts a ON a.id = tm.account_id
+		WHERE tm.team_id = ? ORDER BY tm.role DESC, a.name ASC`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TeamMember
+	for rows.Next() {
+		var m TeamMember
+		if err := rows.Scan(&m.AccountID, &m.Name, &m.Email, &m.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// RemoveTeamMember removes a member. The owner cannot be removed.
+func (d *DB) RemoveTeamMember(teamID, accountID string) error {
+	_, err := d.sql.Exec(
+		`DELETE FROM team_members WHERE team_id = ? AND account_id = ? AND role != 'owner'`,
+		teamID, accountID)
+	return err
 }
 
 // ---- comments ---------------------------------------------------------------------

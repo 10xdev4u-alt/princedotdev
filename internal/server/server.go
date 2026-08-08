@@ -75,7 +75,14 @@ func (s *Server) routes() {
 	m.Handle("GET /api/teams", s.requireAuth(s.handleListTeams))
 	m.Handle("POST /api/teams", s.requireAuth(s.handleCreateTeam))
 	m.Handle("GET /api/teams/{teamId}", s.requireAuth(s.handleTeamDetail))
+	m.Handle("GET /api/teams/{teamId}/members", s.requireAuth(s.handleListTeamMembers))
 	m.Handle("POST /api/teams/{teamId}/members", s.requireAuth(s.handleAddTeamMember))
+	m.Handle("DELETE /api/teams/{teamId}/members/{accountId}", s.requireAuth(s.handleRemoveTeamMember))
+
+	// Control panel
+	m.Handle("GET /api/stats", s.requireAuth(s.handleStats))
+	m.Handle("POST /api/api-keys", s.requireAuth(s.handleMintKey))
+	m.Handle("DELETE /api/api-keys/{keyId}", s.requireAuth(s.handleRevokeKey))
 
 	// Uploads (anonymous allowed; auth resolved before rate limiting so the
 	// limiter can key on the API key when present).
@@ -93,7 +100,7 @@ func (s *Server) routes() {
 	m.Handle("GET /d/{draftId}/v/{versionNumber}/raw", s.noStore(s.handleServe()))
 
 	// Web dashboard (session-gated); register only when SESSION_SECRET is set.
-	s.dashboard = web.NewDashboard(s.cfg.SessionSecret, s.db)
+	s.dashboard = web.NewDashboard(s.cfg.SessionSecret, s.db, s.cfg.StorageBudget)
 	if s.dashboard.Enabled() {
 		s.dashboard.Routes(m)
 	}

@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"strings"
 	"time"
@@ -87,6 +88,13 @@ const pageCSS = `<!doctype html>
   .teams{padding-left:20px}
   .keybox{display:flex;gap:10px;align-items:center;background:var(--nord1);border:1px solid var(--nord2);border-radius:8px;padding:14px;margin:14px 0}
   .keybox code{flex:1;word-break:break-all;background:none;border:0;font-size:15px}
+  .meter{height:12px;background:var(--nord1);border:1px solid var(--nord2);border-radius:999px;overflow:hidden;margin:6px 0 2px}
+  .meter-fill{height:100%;background:var(--nord8);border-radius:999px}
+  .meter-fill.warn{background:var(--nord13)}
+  .meter-fill.bad{background:var(--nord11)}
+  .inline-form{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .text.inline{width:260px;margin:0}
+  .bad{color:var(--nord11)}
 </style>`
 
 func renderPage(p Page) string {
@@ -114,6 +122,7 @@ var headerTpl = template.Must(template.New("header").Parse(`
   <nav>
     <a href="/dashboard" {{if eq .Active "dashboard"}}class="active"{{end}}>My drafts</a>
     <a href="/cli/auth" {{if eq .Active "cli"}}class="active"{{end}}>CLI setup</a>
+    <a href="/dashboard/settings" {{if eq .Active "settings"}}class="active"{{end}}>Settings</a>
   </nav>
   <form method="post" action="/auth/sign-out">
     <span class="muted small">{{.AccountName}}</span>
@@ -211,7 +220,7 @@ var draftDetailTpl = template.Must(template.New("detail").Parse(`
         <td><a href="/d/{{$.DraftID}}/v/{{.VersionNumber}}" target="_blank" rel="noopener noreferrer">v{{.VersionNumber}}</a></td>
         <td>{{.CommitSubject}}{{if .GitDirty}} <span class="pill pill-warn">dirty</span>{{end}}</td>
         <td class="muted mono">{{.Branch}} {{.ShortSHA}}</td>
-        <td class="muted">{{.CreatedLabel}}</td>
+        <td class="muted">{{if .Author}}{{.Author}} · {{end}}{{.CreatedLabel}}</td>
       </tr>
       {{end}}
     {{else}}
@@ -282,6 +291,63 @@ var cliAuthKeyTpl = template.Must(template.New("cli-key").Parse(`
   </script>
 </main>`))
 
+var settingsTpl = template.Must(template.New("settings").Parse(`
+<main>
+  <h1>Settings</h1>
+
+  <h2 id="storage">Storage</h2>
+  <div class="meter">
+    <div class="meter-fill {{.MeterClass}}" style="width: {{.UsedPercent}}%"></div>
+  </div>
+  <p class="muted small">{{.UsedLabel}} of {{.BudgetLabel}} used · {{.DraftCount}} drafts · {{.VersionCount}} versions · {{.CommentCount}} comments · {{.AccountCount}} accounts · {{.TeamCount}} teams</p>
+
+  <h2 id="api-keys">API keys</h2>
+  <table>
+    <tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr>
+    {{if .Keys}}
+      {{range .Keys}}
+      <tr>
+        <td>{{.Name}}</td>
+        <td class="muted">{{.CreatedLabel}}</td>
+        <td class="muted">{{.LastUsedLabel}}</td>
+        <td>
+          <form method="post" action="/dashboard/settings/keys/{{.ID}}/revoke" onsubmit="return confirm('Revoke this key?')">
+            <button class="linklike bad" type="submit">Revoke</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    {{else}}
+      <tr><td colspan="4" class="muted">No keys yet — mint one on the <a href="/cli/auth">CLI setup</a> page.</td></tr>
+    {{end}}
+  </table>
+
+  {{range .Teams}}
+  <h2>Team: {{.Name}}</h2>
+  <table>
+    <tr><th>Member</th><th>Email</th><th>Role</th><th></th></tr>
+    {{range .Members}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="muted">{{.Email}}</td>
+      <td>{{.Role}}</td>
+      <td>
+        {{if eq .Role "owner"}}<span class="muted small">owner</span>{{else}}
+        <form method="post" action="/dashboard/settings/teams/{{$.TeamID}}/members/{{.AccountID}}/remove" onsubmit="return confirm('Remove {{.Name}}?')">
+          <button class="linklike bad" type="submit">Remove</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  <form class="inline-form" method="post" action="/dashboard/settings/teams/{{.TeamID}}/members/add">
+    <input class="text inline" type="email" name="email" placeholder="teammate@team.dev" required />
+    <button class="button" type="submit">Add member</button>
+  </form>
+  {{end}}
+</main>`))
+
 var errorTpl = template.Must(template.New("error").Parse(`
 <main class="narrow center">
   <h1>Problem</h1>
@@ -325,6 +391,7 @@ type versionRow struct {
 	Branch        string
 	ShortSHA      string
 	GitDirty      bool
+	Author        string
 	CreatedLabel  string
 }
 
@@ -355,6 +422,30 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
+}
+
+// formatBytes renders byte counts human-readably (storage meter).
+func formatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return itoa(n) + " B"
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	val := float64(n) / float64(div)
+	switch {
+	case exp == 0:
+		return fmt.Sprintf("%.1f KB", val)
+	case exp == 1:
+		return fmt.Sprintf("%.1f MB", val)
+	case exp == 2:
+		return fmt.Sprintf("%.1f GB", val)
+	default:
+		return fmt.Sprintf("%.1f TB", val)
+	}
 }
 
 func anchorLabel(raw string) string {

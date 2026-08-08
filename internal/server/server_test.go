@@ -258,6 +258,55 @@ func TestStorageBudget(t *testing.T) {
 	}
 }
 
+func TestControlPanel(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+
+	// stats
+	_, stats := doJSON(t, h, "GET", "/api/stats", nil, token)
+	if stats["storageBudget"].(float64) != 5*1024*1024*1024 {
+		t.Fatalf("budget %v", stats["storageBudget"])
+	}
+
+	// mint a key
+	rec, minted := doJSON(t, h, "POST", "/api/api-keys", map[string]any{"name": "sandbox"}, token)
+	if rec.Code != 201 {
+		t.Fatalf("mint %d", rec.Code)
+	}
+	newToken := minted["token"].(string)
+	keyID := minted["apiKey"].(map[string]any)["id"].(string)
+	if rec := doRaw(t, h, "GET", "/api/me", newToken); rec.Code != 200 {
+		t.Fatalf("new key auth %d", rec.Code)
+	}
+
+	// revoke it
+	if rec := doRaw(t, h, "DELETE", "/api/api-keys/"+keyID, token); rec.Code != 200 {
+		t.Fatalf("revoke %d", rec.Code)
+	}
+	if rec := doRaw(t, h, "GET", "/api/me", newToken); rec.Code != 401 {
+		t.Fatalf("revoked key still works: %d", rec.Code)
+	}
+
+	// team members: create team, add member, list, remove
+	_, team := doJSON(t, h, "POST", "/api/teams", map[string]any{"name": "Eng"}, token)
+	teamID := team["team"].(map[string]any)["id"].(string)
+	ben, _ := d.CreateAccount("Ben", "ben@team.dev")
+	doJSON(t, h, "POST", "/api/teams/"+teamID+"/members", map[string]any{"email": "ben@team.dev"}, token)
+	_, members := doJSON(t, h, "GET", "/api/teams/"+teamID+"/members", nil, token)
+	if len(members["members"].([]any)) != 2 {
+		t.Fatalf("members %v", members)
+	}
+	if rec := doRaw(t, h, "DELETE", "/api/teams/"+teamID+"/members/"+ben, token); rec.Code != 200 {
+		t.Fatalf("remove member %d", rec.Code)
+	}
+	_, members2 := doJSON(t, h, "GET", "/api/teams/"+teamID+"/members", nil, token)
+	if len(members2["members"].([]any)) != 1 {
+		t.Fatalf("members after remove %v", members2)
+	}
+}
+
 func TestBackupRestore(t *testing.T) {
 	s, d, dir := newTestServer(t, nil)
 	h := s.Handler()

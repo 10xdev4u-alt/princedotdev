@@ -10,15 +10,16 @@ import (
 )
 
 // NewDashboard builds the web UI handler. Sessions are disabled when secret
-// is empty (no SESSION_SECRET).
-func NewDashboard(cfgSecret string, d *db.DB) *DashboardHandler {
-	return &DashboardHandler{db: d, secret: cfgSecret}
+// is empty (no SESSION_SECRET). storageBudget feeds the settings meter.
+func NewDashboard(cfgSecret string, d *db.DB, storageBudget int64) *DashboardHandler {
+	return &DashboardHandler{db: d, secret: cfgSecret, budget: storageBudget}
 }
 
 // DashboardHandler serves the web UI. Safe for concurrent ServeHTTP calls.
 type DashboardHandler struct {
 	db     *db.DB
 	secret string
+	budget int64
 }
 
 // Enabled reports whether sessions are configured (SESSION_SECRET set).
@@ -34,6 +35,10 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/status", h.handlePostStatus)
 	mux.HandleFunc("GET /cli/auth", h.handleCLIAuth)
 	mux.HandleFunc("POST /cli/auth/keys", h.handleMintKey)
+	mux.HandleFunc("GET /dashboard/settings", h.handleSettings)
+	mux.HandleFunc("POST /dashboard/settings/keys/{keyId}/revoke", h.handleRevokeKey)
+	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/members/add", h.handleSettingsAddMember)
+	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/members/{accountId}/remove", h.handleSettingsRemoveMember)
 }
 
 // ---- handlers ---------------------------------------------------------------
@@ -150,6 +155,7 @@ func (h *DashboardHandler) handleDraftPage(w http.ResponseWriter, r *http.Reques
 			Branch:        v.GitBranch,
 			ShortSHA:      shortSHA(v.GitCommitSHA),
 			GitDirty:      v.GitDirty,
+			Author:        v.Author,
 			CreatedLabel:  formatDate(v.CreatedAt),
 		})
 	}
@@ -311,6 +317,160 @@ func (h *DashboardHandler) handleMintKey(w http.ResponseWriter, r *http.Request)
 		Header: h.header(session, "cli"),
 		Body:   body,
 	})
+}
+
+// ---- settings (control panel) ------------------------------------------------
+
+func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	stats, err := h.db.Stats()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load stats.")
+		return
+	}
+	keys, err := h.db.ListAPIKeys(session.AccountID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load keys.")
+		return
+	}
+	teams, err := h.db.ListTeamsForAccount(session.AccountID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load teams.")
+		return
+	}
+	type memberRow struct {
+		AccountID string
+		Name      string
+		Email     string
+		Role      string
+	}
+	type teamRow struct {
+		TeamID  string
+		Name    string
+		Members []memberRow
+	}
+	tRows := make([]teamRow, 0, len(teams))
+	for _, t := range teams {
+		members, err := h.db.ListTeamMembers(t.ID)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "Could not load team members.")
+			return
+		}
+		mRows := make([]memberRow, 0, len(members))
+		for _, m := range members {
+			mRows = append(mRows, memberRow{AccountID: m.AccountID, Name: m.Name, Email: m.Email, Role: m.Role})
+		}
+		tRows = append(tRows, teamRow{TeamID: t.ID, Name: t.Name, Members: mRows})
+	}
+	type keyRow struct {
+		ID            string
+		Name          string
+		CreatedLabel  string
+		LastUsedLabel string
+	}
+	kRows := make([]keyRow, 0, len(keys))
+	for _, k := range keys {
+		last := "never used"
+		if k.LastUsedAt != "" {
+			last = formatDate(k.LastUsedAt)
+		}
+		kRows = append(kRows, keyRow{ID: k.ID, Name: k.Name, CreatedLabel: formatDate(k.CreatedAt), LastUsedLabel: last})
+	}
+	usedPercent := float64(0)
+	meterClass := ""
+	if h.budget > 0 {
+		usedPercent = float64(stats.StoredBytes) / float64(h.budget) * 100
+		switch {
+		case usedPercent >= 90:
+			meterClass = "bad"
+		case usedPercent >= 70:
+			meterClass = "warn"
+		}
+		if usedPercent > 100 {
+			usedPercent = 100
+		}
+	}
+	body := template.HTML(execOrEmpty(settingsTpl, map[string]any{
+		"UsedPercent":  int(usedPercent),
+		"MeterClass":   meterClass,
+		"UsedLabel":    formatBytes(stats.StoredBytes),
+		"BudgetLabel":  formatBytes(h.budget),
+		"DraftCount":   stats.DraftCount,
+		"VersionCount": stats.VersionCount,
+		"CommentCount": stats.CommentCount,
+		"AccountCount": stats.AccountCount,
+		"TeamCount":    stats.TeamCount,
+		"Keys":         kRows,
+		"Teams":        tRows,
+	}))
+	h.writePage(w, http.StatusOK, Page{
+		Title:  "Settings — draftdeck",
+		Header: h.header(session, "settings"),
+		Body:   body,
+	})
+}
+
+func (h *DashboardHandler) handleRevokeKey(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	if err := h.db.RevokeAPIKey(r.PathValue("keyId"), session.AccountID); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not revoke key.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/settings#api-keys", http.StatusFound)
+}
+
+func (h *DashboardHandler) handleSettingsAddMember(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	teamID := r.PathValue("teamId")
+	if ok, _ := h.db.IsTeamOwner(teamID, session.AccountID); !ok {
+		h.writeError(w, http.StatusForbidden, "Only team owners can add members.")
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(r.FormValue("email")))
+	if email == "" {
+		http.Redirect(w, r, "/dashboard/settings?error=empty-email", http.StatusFound)
+		return
+	}
+	account, err := h.db.FindAccountByEmail(email)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not look up account.")
+		return
+	}
+	if account == nil {
+		http.Redirect(w, r, "/dashboard/settings?error=no-account", http.StatusFound)
+		return
+	}
+	if err := h.db.AddTeamMember(teamID, account.ID, "member"); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not add member.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/settings", http.StatusFound)
+}
+
+func (h *DashboardHandler) handleSettingsRemoveMember(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	teamID := r.PathValue("teamId")
+	if ok, _ := h.db.IsTeamOwner(teamID, session.AccountID); !ok {
+		h.writeError(w, http.StatusForbidden, "Only team owners can remove members.")
+		return
+	}
+	if err := h.db.RemoveTeamMember(teamID, r.PathValue("accountId")); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not remove member.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/settings", http.StatusFound)
 }
 
 // ---- helpers -----------------------------------------------------------------
