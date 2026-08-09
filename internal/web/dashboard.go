@@ -914,6 +914,13 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		h.writeError(w, http.StatusInternalServerError, "Could not load webhooks.")
 		return
 	}
+	type webhookDeliveryRow struct {
+		TimeLabel   string
+		Event       string
+		Status      string
+		StatusLabel string
+		OK          bool
+	}
 	type webhookRow struct {
 		ID          string
 		Name        string
@@ -921,6 +928,7 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		EventsLabel string
 		LastLabel   string
 		TeamName    string
+		Deliveries  []webhookDeliveryRow
 	}
 	wRows := make([]webhookRow, 0, len(webhooks))
 	teamName := map[string]string{}
@@ -941,6 +949,17 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 				last = truncateStr(wh.LastError, 60)
 			}
 		}
+		deliveries, _ := h.db.ListWebhookDeliveries(wh.ID, 5)
+		dRows := make([]webhookDeliveryRow, 0, len(deliveries))
+		for _, dl := range deliveries {
+			dRows = append(dRows, webhookDeliveryRow{
+				TimeLabel:   formatDate(dl.CreatedAt),
+				Event:       dl.Event,
+				Status:      strconv.FormatInt(int64(dl.Status), 10),
+				StatusLabel: "delivered",
+				OK:          dl.Status >= 200 && dl.Status < 300,
+			})
+		}
 		wRows = append(wRows, webhookRow{
 			ID:          wh.ID,
 			Name:        wh.Name,
@@ -948,6 +967,7 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 			EventsLabel: events,
 			LastLabel:   last,
 			TeamName:    teamName[wh.TeamID],
+			Deliveries:  dRows,
 		})
 	}
 	usedPercent := float64(0)

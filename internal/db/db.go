@@ -166,6 +166,15 @@ CREATE TABLE IF NOT EXISTS webhooks (
   last_status INTEGER,
   last_error TEXT
 );
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id TEXT PRIMARY KEY,
+  webhook_id TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  event TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_hook ON webhook_deliveries(webhook_id);
 CREATE INDEX IF NOT EXISTS idx_versions_draft ON draft_versions(draft_id);
 CREATE INDEX IF NOT EXISTS idx_comments_draft ON comments(draft_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_team ON drafts(team_id);
@@ -1330,6 +1339,16 @@ func (d *DB) DeleteInvite(id string) error {
 
 // ---- webhooks ----------------------------------------------------------------------
 
+// WebhookDelivery is one delivery attempt in a webhook's history.
+type WebhookDelivery struct {
+	ID        string `json:"id"`
+	WebhookID string `json:"webhookId"`
+	Event     string `json:"event"`
+	Status    int    `json:"status"`
+	Error     string `json:"error"`
+	CreatedAt string `json:"createdAt"`
+}
+
 // Webhook is an outbound notification endpoint (Discord/Slack/generic).
 type Webhook struct {
 	ID         string `json:"id"`
@@ -1421,6 +1440,39 @@ func (d *DB) SetWebhookResult(id string, status int, errMsg string) error {
 		UPDATE webhooks SET last_status = ?, last_error = ?, updated_at = datetime('now')
 		WHERE id = ?`, status, nullIfEmpty(errMsg), id)
 	return err
+}
+
+// RecordWebhookDelivery appends one delivery attempt to the history log.
+func (d *DB) RecordWebhookDelivery(webhookID, event string, status int, errMsg string) error {
+	_, err := d.sql.Exec(`
+		INSERT INTO webhook_deliveries (id, webhook_id, event, status, error)
+		VALUES (?, ?, ?, ?, ?)`,
+		newID("dly"), webhookID, event, status, nullIfEmpty(errMsg))
+	return err
+}
+
+// ListWebhookDeliveries returns a webhook's delivery history, newest first.
+func (d *DB) ListWebhookDeliveries(webhookID string, limit int) ([]WebhookDelivery, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := d.sql.Query(`
+		SELECT id, webhook_id, event, status, COALESCE(error,''), created_at
+		FROM webhook_deliveries WHERE webhook_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+		webhookID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WebhookDelivery
+	for rows.Next() {
+		var dl WebhookDelivery
+		if err := rows.Scan(&dl.ID, &dl.WebhookID, &dl.Event, &dl.Status, &dl.Error, &dl.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, dl)
+	}
+	return out, rows.Err()
 }
 
 // ---- helpers ------------------------------------------------------------------------

@@ -938,3 +938,58 @@ func TestAuditLogAndTeamStorage(t *testing.T) {
 		t.Fatalf("storedBytes %v, want %d", teams[0].(map[string]any)["storedBytes"], len(testHTML))
 	}
 }
+
+func TestWebhookDeliveryHistory(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+	h := s.Handler()
+
+	var received int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body)
+		received++
+		w.WriteHeader(204)
+	}))
+	defer ts.Close()
+
+	_, resp := doJSON(t, h, "POST", "/api/webhooks", map[string]any{"name": "chan", "kind": "discord", "url": ts.URL, "events": []string{"upload"}}, token)
+	whID := resp["webhook"].(map[string]any)["id"].(string)
+
+	// two uploads -> two deliveries
+	doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "h.html"}, token)
+	doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "h2.html"}, token)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) && received < 2 {
+		time.Sleep(25 * time.Millisecond)
+	}
+	if received < 2 {
+		t.Fatalf("expected 2 deliveries, got %d", received)
+	}
+
+	// history endpoint returns them, newest first
+	rec, body := doJSON(t, h, "GET", "/api/webhooks/"+whID+"/deliveries", nil, token)
+	if rec.Code != 200 {
+		t.Fatalf("deliveries %d", rec.Code)
+	}
+	deliveries := body["deliveries"].([]any)
+	if len(deliveries) != 2 {
+		t.Fatalf("deliveries %v", deliveries)
+	}
+	first := deliveries[0].(map[string]any)
+	if first["event"] != "upload" || first["status"].(float64) != 204 {
+		t.Fatalf("first delivery %v", first)
+	}
+
+	// deleting the webhook cascades its history
+	rec, _ = doJSON(t, h, "DELETE", "/api/webhooks/"+whID, nil, token)
+	if rec.Code != 200 {
+		t.Fatalf("delete %d", rec.Code)
+	}
+	// cascade means the rows are gone; a fresh query just returns empty
+	rows, err := d.ListWebhookDeliveries(whID, 10)
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("cascade failed: %d rows err %v", len(rows), err)
+	}
+}
