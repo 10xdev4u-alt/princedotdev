@@ -34,6 +34,7 @@ func New(cfg config.Config) (*Server, error) {
 		return nil, err
 	}
 	web.Init(cfg.PublicBaseURL)
+	publicDraftURL = strings.TrimRight(cfg.PublicBaseURL, "/")
 	s := &Server{
 		cfg:   cfg,
 		db:    d,

@@ -29,6 +29,7 @@ type webhookEvent struct {
 	Event         string
 	Actor         string
 	Draft         *db.Draft
+	TeamName      string
 	VersionNumber int64
 	Comment       *db.Comment
 	FromStatus    string
@@ -42,6 +43,11 @@ type webhookEvent struct {
 func (s *Server) fireWebhooks(ev webhookEvent) {
 	if ev.Draft == nil {
 		return
+	}
+	if ev.Draft.TeamID != "" && ev.TeamName == "" {
+		if team, err := s.db.FindTeam(ev.Draft.TeamID); err == nil {
+			ev.TeamName = team.Name
+		}
 	}
 	all, err := s.db.ListWebhooks()
 	if err != nil {
@@ -104,7 +110,7 @@ func postJSON(target string, payload []byte) (int, string) {
 func buildWebhookPayload(kind string, ev webhookEvent) []byte {
 	base := map[string]any{
 		"event":      ev.Event,
-		"draft":      draftPayload(ev.Draft),
+		"draft":      draftPayload(ev.Draft, ev.TeamName),
 		"actor":      orAnonymous(ev.Actor),
 		"version":    ev.VersionNumber,
 		"fromStatus": ev.FromStatus,
@@ -128,49 +134,56 @@ func buildWebhookPayload(kind string, ev webhookEvent) []byte {
 	}
 }
 
-func draftPayload(d *db.Draft) map[string]any {
+func draftPayload(d *db.Draft, teamName string) map[string]any {
+	if d == nil {
+		return map[string]any{}
+	}
 	return map[string]any{
 		"id":         d.ID,
 		"title":      d.Title,
 		"status":     d.Status,
 		"visibility": d.Visibility,
 		"teamId":     orEmpty(d.TeamID),
+		"teamName":   orEmpty(teamName),
 	}
 }
 
+// discordPayload renders a rich embed: clickable title, actor as the author,
+// event-specific color + emoji, humanized status, team name, and context
+// fields. The whole thing is human-scannable at a glance.
 func discordPayload(ev webhookEvent) map[string]any {
 	title := draftTitle(ev)
-	color := statusColor(ev.ToStatus)
-	desc := eventLine(ev)
-	fields := []map[string]any{}
-	if ev.ToStatus != "" {
-		fields = append(fields, map[string]any{"name": "Status", "value": ev.ToStatus, "inline": true})
-	}
-	if ev.VersionNumber > 0 {
-		fields = append(fields, map[string]any{"name": "Version", "value": "v" + strconv.FormatInt(ev.VersionNumber, 10), "inline": true})
-	}
-	if ev.Draft.TeamID != "" {
-		fields = append(fields, map[string]any{"name": "Team", "value": ev.Draft.TeamID, "inline": true})
-	}
 	embed := map[string]any{
 		"title":       title,
-		"description": desc,
-		"color":       color,
-		"fields":      fields,
-		"footer":      map[string]any{"text": "draftdeck · " + orAnonymous(ev.Actor)},
+		"description": eventLine(ev),
+		"color":       eventColor(ev),
+		"author":      map[string]any{"name": orAnonymous(ev.Actor)},
+		"fields":      eventFields(ev),
+		"footer":      map[string]any{"text": "draftdeck"},
+	}
+	if isRealDraft(ev) {
+		embed["url"] = draftURL(ev.Draft.ID)
 	}
 	return map[string]any{"event": ev.Event, "content": nil, "embeds": []map[string]any{embed}}
 }
 
 func slackPayload(ev webhookEvent) map[string]any {
-	text := "*" + draftTitle(ev) + "*\n" + eventLine(ev)
+	var b strings.Builder
+	fmt.Fprintf(&b, "*%s*\n%s", draftTitle(ev), eventLine(ev))
+	if ev.TeamName != "" {
+		fmt.Fprintf(&b, "\n_%s_", ev.TeamName)
+	}
+	blocks := []map[string]any{
+		{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": b.String()}},
+		{"type": "context", "elements": []map[string]any{{"type": "mrkdwn", "text": "draftdeck · " + orAnonymous(ev.Actor)}}},
+	}
+	if isRealDraft(ev) {
+		blocks = append(blocks, map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "<" + draftURL(ev.Draft.ID) + "|Open draft>"}})
+	}
 	return map[string]any{
-		"event": ev.Event,
-		"text":  text,
-		"blocks": []map[string]any{
-			{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": text}},
-			{"type": "context", "elements": []map[string]any{{"type": "mrkdwn", "text": "draftdeck · " + orAnonymous(ev.Actor)}}},
-		},
+		"event":  ev.Event,
+		"text":   b.String(),
+		"blocks": blocks,
 	}
 }
 
@@ -181,23 +194,81 @@ func draftTitle(ev webhookEvent) string {
 	return ev.Draft.Title
 }
 
+func isRealDraft(ev webhookEvent) bool {
+	return ev.Draft != nil && ev.Draft.ID != "" && ev.Draft.ID != "test"
+}
+
+// draftURL is filled in by the server (publicBaseURL is a package var in web;
+// the server keeps its own copy in the config).
+func draftURL(id string) string {
+	return publicDraftURL + "/d/" + id
+}
+
+// publicDraftURL is set once at startup from the server config.
+var publicDraftURL string
+
 func eventLine(ev webhookEvent) string {
 	switch ev.Event {
 	case evUpload:
-		return "published a new version"
+		if ev.VersionNumber > 0 {
+			return "🚀 Published **v" + strconv.FormatInt(ev.VersionNumber, 10) + "**"
+		}
+		return "🚀 Published a new version"
 	case evComment:
 		body := ""
 		if ev.Comment != nil {
-			body = ": " + truncate(ev.Comment.Body, 200)
+			body = "> " + strings.ReplaceAll(truncate(ev.Comment.Body, 280), "\n", "\n> ")
 		}
-		return "commented" + body
+		return "💬 Commented:\n" + body
 	case evStatus:
-		if ev.FromStatus != "" && ev.ToStatus != "" {
-			return "moved " + ev.FromStatus + " → " + ev.ToStatus
+		if ev.ToStatus == "" {
+			return "Status updated"
 		}
-		return "changed status to " + ev.ToStatus
+		line := statusEmoji(ev.ToStatus) + " **" + statusHuman(ev.ToStatus) + "**"
+		if ev.FromStatus != "" && ev.FromStatus != ev.ToStatus {
+			line += " · was " + statusHuman(ev.FromStatus)
+		}
+		return line
 	}
 	return ev.Event
+}
+
+// eventFields returns the context fields shown under the description.
+func eventFields(ev webhookEvent) []map[string]any {
+	fields := []map[string]any{}
+	switch ev.Event {
+	case evStatus:
+		if ev.ToStatus != "" {
+			fields = append(fields, map[string]any{"name": "Status", "value": statusHuman(ev.ToStatus), "inline": true})
+		}
+	case evComment:
+		if ev.Comment != nil {
+			if anchor := strings.TrimSpace(ev.Comment.Anchor); anchor != "" {
+				fields = append(fields, map[string]any{"name": "Anchor", "value": "`" + truncate(anchor, 40) + "`", "inline": true})
+			}
+		}
+	}
+	if ev.VersionNumber > 0 {
+		fields = append(fields, map[string]any{"name": "Version", "value": "v" + strconv.FormatInt(ev.VersionNumber, 10), "inline": true})
+	}
+	if ev.TeamName != "" {
+		fields = append(fields, map[string]any{"name": "Team", "value": ev.TeamName, "inline": true})
+	}
+	return fields
+}
+
+// eventColor picks the embed accent: status events follow the status, the
+// others get a stable event color.
+func eventColor(ev webhookEvent) int {
+	switch ev.Event {
+	case evStatus:
+		return statusColor(ev.ToStatus)
+	case evComment:
+		return 0xebcb8b // nordic yellow
+	case evUpload:
+		return 0x88c0d0 // nordic blue
+	}
+	return 0xc6f24e // nordic lime
 }
 
 func statusColor(status string) int {
@@ -209,7 +280,35 @@ func statusColor(status string) int {
 	case "changes_requested":
 		return 0xf87171
 	}
-	return 0xc6f24e // nordic accent
+	return 0x9aa0a6
+}
+
+func statusHuman(s string) string {
+	switch s {
+	case "draft":
+		return "Draft"
+	case "in_review":
+		return "In review"
+	case "changes_requested":
+		return "Changes requested"
+	case "approved":
+		return "Approved"
+	}
+	return s
+}
+
+func statusEmoji(s string) string {
+	switch s {
+	case "approved":
+		return "✅"
+	case "in_review":
+		return "🔎"
+	case "changes_requested":
+		return "🔧"
+	case "draft":
+		return "📝"
+	}
+	return "📄"
 }
 
 func mustJSON(v any) []byte {
