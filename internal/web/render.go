@@ -346,6 +346,53 @@ var settingsTpl = template.Must(template.New("settings").Parse(`
     <button class="button" type="submit">Add member</button>
   </form>
   {{end}}
+
+  <h2 id="webhooks">Webhooks</h2>
+  <p class="muted small">draftdeck pushes <b>upload / comment / status</b> events here — the agent-report loop: an agent posts to draftdeck, your Discord or Slack channel hears about it instantly.</p>
+  {{if .Webhooks}}
+  <table>
+    <tr><th>Name</th><th>Kind</th><th>Events</th><th>Last delivery</th><th></th></tr>
+    {{range .Webhooks}}
+    <tr>
+      <td>{{.Name}}{{if .TeamName}} <span class="pill pill-team">{{.TeamName}}</span>{{end}}</td>
+      <td class="muted">{{.Kind}}</td>
+      <td class="muted">{{.EventsLabel}}</td>
+      <td class="muted">{{.LastLabel}}</td>
+      <td>
+        <div class="inline-form">
+          <form method="post" action="/dashboard/settings/webhooks/{{.ID}}/test">
+            <button class="linklike" type="submit">Test</button>
+          </form>
+          <form method="post" action="/dashboard/settings/webhooks/{{.ID}}/delete" onsubmit="return confirm('Delete {{.Name}}?')">
+            <button class="linklike bad" type="submit">Delete</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted small">No webhooks yet — add one below.</p>
+  {{end}}
+  <form class="inline-form" method="post" action="/dashboard/settings/webhooks/add" style="flex-wrap:wrap">
+    <input class="text inline" type="text" name="name" placeholder="Team channel" required />
+    <select class="text inline" name="kind" style="width:auto">
+      <option value="discord">Discord</option>
+      <option value="slack">Slack</option>
+      <option value="generic">Generic JSON</option>
+    </select>
+    <input class="text inline" type="url" name="url" placeholder="https://discord.com/api/webhooks/…" required style="width:360px" />
+    <label class="small"><input type="checkbox" name="events" value="upload" checked /> upload</label>
+    <label class="small"><input type="checkbox" name="events" value="comment" checked /> comment</label>
+    <label class="small"><input type="checkbox" name="events" value="status" checked /> status</label>
+    {{if .Teams}}
+    <select class="text inline" name="teamId" style="width:auto">
+      <option value="">Personal</option>
+      {{range .Teams}}<option value="{{.TeamID}}">{{.Name}} (team)</option>{{end}}
+    </select>
+    {{end}}
+    <button class="button" type="submit">Add webhook</button>
+  </form>
 </main>`))
 
 var errorTpl = template.Must(template.New("error").Parse(`
