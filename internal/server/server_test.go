@@ -604,3 +604,81 @@ func TestActivityFeed(t *testing.T) {
 		t.Fatalf("unread after read %v", feedM2["unread"])
 	}
 }
+
+func TestRolesAndApprovals(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	ownerID, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, ownerTok, _ := d.CreateAPIKey(ownerID, "cli")
+	benID, _ := d.CreateAccount("Ben", "ben@team.dev")
+	_, benTok, _ := d.CreateAPIKey(benID, "cli")
+	zoeyID, _ := d.CreateAccount("Zoey", "zoey@team.dev")
+	_, zoeyTok, _ := d.CreateAPIKey(zoeyID, "cli")
+
+	_, team := doJSON(t, h, "POST", "/api/teams", map[string]any{"name": "Eng"}, ownerTok)
+	teamID := team["team"].(map[string]any)["id"].(string)
+	doJSON(t, h, "POST", "/api/teams/"+teamID+"/members", map[string]any{"email": "ben@team.dev"}, ownerTok)
+	doJSON(t, h, "POST", "/api/teams/"+teamID+"/members", map[string]any{"email": "zoey@team.dev"}, ownerTok)
+
+	// owner promotes Ben to admin
+	if rec, _ := doJSON(t, h, "PUT", "/api/teams/"+teamID+"/members/"+benID, map[string]any{"role": "admin"}, ownerTok); rec.Code != 200 {
+		t.Fatalf("promote %d", rec.Code)
+	}
+	// admin can set the approval gate
+	if rec, _ := doJSON(t, h, "PUT", "/api/teams/"+teamID, map[string]any{"requiredApprovals": 2}, benTok); rec.Code != 200 {
+		t.Fatalf("admin gate %d", rec.Code)
+	}
+	// plain member cannot
+	if rec, _ := doJSON(t, h, "PUT", "/api/teams/"+teamID, map[string]any{"requiredApprovals": 1}, zoeyTok); rec.Code != 403 {
+		t.Fatalf("member gate %d", rec.Code)
+	}
+	// admin cannot change roles (owner only)
+	if rec, _ := doJSON(t, h, "PUT", "/api/teams/"+teamID+"/members/"+zoeyID, map[string]any{"role": "admin"}, benTok); rec.Code != 403 {
+		t.Fatalf("admin role change %d", rec.Code)
+	}
+	// owner cannot demote another owner
+	_, team2 := doJSON(t, h, "POST", "/api/teams", map[string]any{"name": "Ops"}, ownerTok)
+	team2ID := team2["team"].(map[string]any)["id"].(string)
+	if rec, _ := doJSON(t, h, "PUT", "/api/teams/"+team2ID+"/members/"+ownerID, map[string]any{"role": "member"}, ownerTok); rec.Code != 200 {
+		t.Fatalf("demote owner %d", rec.Code)
+	}
+	_, members := doJSON(t, h, "GET", "/api/teams/"+team2ID+"/members", nil, ownerTok)
+	if members["members"].([]any)[0].(map[string]any)["role"] != "owner" {
+		t.Fatalf("owner role changed: %v", members)
+	}
+
+	// approval gate: team draft needs 2 approvals
+	_, up := doJSON(t, h, "POST", "/api/uploads",
+		map[string]any{"html": testHTML, "teamId": teamID, "visibility": "team"}, ownerTok)
+	draftID := up["draftId"].(string)
+
+	// Ben approves → still in_review (1/2)
+	rec, out := doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, benTok)
+	if rec.Code != 200 || out["approved"].(bool) {
+		t.Fatalf("ben approve %v %v", rec.Code, out)
+	}
+	if out["draft"].(map[string]any)["status"] != "in_review" {
+		t.Fatalf("status %v", out["draft"])
+	}
+	app := out["draft"].(map[string]any)["approvals"].(map[string]any)
+	if app["count"].(float64) != 1 || app["required"].(float64) != 2 {
+		t.Fatalf("approvals %v", app)
+	}
+
+	// Ben approves again → still 1 (idempotent)
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, benTok)
+	_, det := doJSON(t, h, "GET", "/api/drafts/"+draftID, nil, ownerTok)
+	app2 := det["draft"].(map[string]any)["approvals"].(map[string]any)
+	if app2["count"].(float64) != 1 {
+		t.Fatalf("dup approval counted %v", app2)
+	}
+
+	// Zoey approves → gate reached, approved
+	rec, out2 := doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, zoeyTok)
+	if rec.Code != 200 || !out2["approved"].(bool) {
+		t.Fatalf("zoey approve %v %v", rec.Code, out2)
+	}
+	if out2["draft"].(map[string]any)["status"] != "approved" {
+		t.Fatalf("final status %v", out2["draft"])
+	}
+}

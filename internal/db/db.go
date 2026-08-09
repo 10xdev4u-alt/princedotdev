@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS comments (
   author TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS draft_approvals (
+  draft_id TEXT NOT NULL REFERENCES drafts(id),
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (draft_id, account_id)
+);
 CREATE TABLE IF NOT EXISTS activity (
   id TEXT PRIMARY KEY,
   account_id TEXT REFERENCES accounts(id),
@@ -169,6 +175,9 @@ func Open(cfg config.Config) (*DB, error) {
 	}
 	// Additive column migrations for pre-existing databases.
 	if err := d.ensureColumn("accounts", "feed_read_at", "TEXT"); err != nil {
+		return nil, err
+	}
+	if err := d.ensureColumn("teams", "required_approvals", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return nil, err
 	}
 	if err := d.ensureSentinel(); err != nil {
@@ -330,9 +339,10 @@ func (d *DB) ListAPIKeys(accountID string) ([]APIKey, error) {
 
 // Team is a shared workspace for a group of accounts.
 type Team struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	CreatedAt string `json:"createdAt"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	CreatedAt         string `json:"createdAt"`
+	RequiredApprovals int64  `json:"requiredApprovals"`
 }
 
 // CreateTeam makes a team owned by accountID.
@@ -352,9 +362,9 @@ func (d *DB) CreateTeam(name, ownerID string) (Team, error) {
 
 // FindTeam returns a team by id.
 func (d *DB) FindTeam(id string) (Team, error) {
-	row := d.sql.QueryRow(`SELECT id, name, created_at FROM teams WHERE id = ?`, id)
+	row := d.sql.QueryRow(`SELECT id, name, created_at, COALESCE(required_approvals,0) FROM teams WHERE id = ?`, id)
 	var t Team
-	err := row.Scan(&t.ID, &t.Name, &t.CreatedAt)
+	err := row.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.RequiredApprovals)
 	return t, err
 }
 
@@ -391,6 +401,47 @@ func (d *DB) IsTeamOwner(teamID, accountID string) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// UpdateTeamApprovals sets the approval-gate count for a team.
+func (d *DB) UpdateTeamApprovals(teamID string, n int64) error {
+	_, err := d.sql.Exec(`UPDATE teams SET required_approvals = ? WHERE id = ?`, n, teamID)
+	return err
+}
+
+// IsTeamAdmin reports whether accountID is an admin or owner of teamID.
+func (d *DB) IsTeamAdmin(teamID, accountID string) (bool, error) {
+	var one int
+	err := d.sql.QueryRow(
+		`SELECT 1 FROM team_members WHERE team_id = ? AND account_id = ? AND role IN ('owner','admin')`,
+		teamID, accountID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// SetMemberRole updates a member's role (owner rows are protected).
+func (d *DB) SetMemberRole(teamID, accountID, role string) error {
+	_, err := d.sql.Exec(
+		`UPDATE team_members SET role = ? WHERE team_id = ? AND account_id = ? AND role != 'owner'`,
+		role, teamID, accountID)
+	return err
+}
+
+// AddDraftApproval records an approver for a draft (idempotent per account).
+func (d *DB) AddDraftApproval(draftID, accountID string) error {
+	_, err := d.sql.Exec(`
+		INSERT OR IGNORE INTO draft_approvals (draft_id, account_id) VALUES (?, ?)`,
+		draftID, accountID)
+	return err
+}
+
+// ApprovalCount returns the number of distinct approvers of a draft.
+func (d *DB) ApprovalCount(draftID string) (int64, error) {
+	var n int64
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM draft_approvals WHERE draft_id = ?`, draftID).Scan(&n)
+	return n, err
 }
 
 // ListTeamDrafts returns the team's drafts (never deleted), newest first.
@@ -440,7 +491,7 @@ func (d *DB) FindAccountByEmail(email string) (*Account, error) {
 // ListTeamsForAccount lists the teams an account belongs to.
 func (d *DB) ListTeamsForAccount(accountID string) ([]Team, error) {
 	rows, err := d.sql.Query(`
-		SELECT t.id, t.name, t.created_at FROM teams t
+		SELECT t.id, t.name, t.created_at, COALESCE(t.required_approvals,0) FROM teams t
 		JOIN team_members tm ON tm.team_id = t.id
 		WHERE tm.account_id = ? ORDER BY t.created_at DESC`, accountID)
 	if err != nil {
@@ -450,7 +501,7 @@ func (d *DB) ListTeamsForAccount(accountID string) ([]Team, error) {
 	var out []Team
 	for rows.Next() {
 		var t Team
-		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.RequiredApprovals); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
