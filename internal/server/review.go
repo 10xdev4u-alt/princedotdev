@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strings"
 
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
 )
@@ -18,11 +19,55 @@ func (s *Server) handleListDrafts(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
-	out := make([]map[string]any, 0, len(items))
+	// Filters: ?q= (title/description), &status=, &tag=, &teamId=
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	status := r.URL.Query().Get("status")
+	tag := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	teamID := r.URL.Query().Get("teamId")
+
+	ids := make([]string, 0, len(items))
+	filtered := make([]db.DraftListItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, s.decorateListItem(it))
+		if status != "" && it.Status != status {
+			continue
+		}
+		if teamID != "" && it.TeamID != teamID {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(it.Title), q) && !strings.Contains(strings.ToLower(it.Description), q) {
+			continue
+		}
+		ids = append(ids, it.DraftID)
+		filtered = append(filtered, it)
+	}
+	tags, err := s.db.TagsForDrafts(ids)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
+	if tag != "" {
+		kept := filtered[:0]
+		for _, it := range filtered {
+			if containsTag(tags[it.DraftID], tag) {
+				kept = append(kept, it)
+			}
+		}
+		filtered = kept
+	}
+	out := make([]map[string]any, 0, len(filtered))
+	for _, it := range filtered {
+		out = append(out, s.decorateListItemWithTags(it, tags[it.DraftID]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "drafts": out})
+}
+
+func containsTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleDraftDetail(w http.ResponseWriter, r *http.Request) {
@@ -50,12 +95,68 @@ func (s *Server) handleDraftDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
+	tags, err := s.db.DraftTags(draft.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"draft":    s.decorateDraft(draft),
 		"versions": decorateVersions(versions),
 		"comments": decorateComments(comments),
+		"tags":     tags,
 	})
+}
+
+// handleSetDraftTags replaces a draft's tags (comma-separated or array).
+func (s *Server) handleSetDraftTags(w http.ResponseWriter, r *http.Request) {
+	key := authFrom(r)
+	draft, err := s.db.FindDraft(r.PathValue("draftId"))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
+	if draft == nil || draft.DeletedAt != "" {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "Draft not found."})
+		return
+	}
+	if !s.canAccess(draft, key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "You don't have access to this draft."})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxJSONBytes))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Could not read request body."})
+		return
+	}
+	var req struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Invalid JSON body."})
+		return
+	}
+	if len(req.Tags) > 20 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Too many tags (max 20)."})
+		return
+	}
+	for _, t := range req.Tags {
+		if len(strings.TrimSpace(t)) > 40 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Tags must be 40 characters or fewer."})
+			return
+		}
+	}
+	if err := s.db.SetDraftTags(draft.ID, req.Tags); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
+	tags, err := s.db.DraftTags(draft.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "tags": tags})
 }
 
 // ---- comments ----------------------------------------------------------------
@@ -261,6 +362,11 @@ func (s *Server) handleDeleteDraft(w http.ResponseWriter, r *http.Request) {
 // ---- decoration ---------------------------------------------------------------
 
 func (s *Server) decorateListItem(it db.DraftListItem) map[string]any {
+	tags, _ := s.db.DraftTags(it.DraftID)
+	return s.decorateListItemWithTags(it, tags)
+}
+
+func (s *Server) decorateListItemWithTags(it db.DraftListItem, tags []string) map[string]any {
 	return map[string]any{
 		"draftId":             it.DraftID,
 		"title":               it.Title,
@@ -272,6 +378,7 @@ func (s *Server) decorateListItem(it db.DraftListItem) map[string]any {
 		"repoName":            nullStr(it.RepoName),
 		"latestVersionNumber": it.LatestVersionNumber,
 		"versionCount":        it.VersionCount,
+		"tags":                tags,
 		"createdAt":           it.CreatedAt,
 		"updatedAt":           it.UpdatedAt,
 		"publicUrl":           s.cfg.PublicBaseURL + "/d/" + it.DraftID,

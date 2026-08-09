@@ -33,6 +33,7 @@ type uploadRequest struct {
 	Description string     `json:"description"`
 	Visibility  string     `json:"visibility"`
 	TeamID      string     `json:"teamId"`
+	Tags        []string   `json:"tags"`
 	Metadata    uploadMeta `json:"metadata"`
 }
 
@@ -212,6 +213,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		VersionNumber: v.VersionNumber,
 	})
 	s.recordActivity("upload", actor, "published v"+strconv.FormatInt(v.VersionNumber, 10), draft)
+	if len(req.Tags) > 0 {
+		if len(req.Tags) > 20 {
+			req.Tags = req.Tags[:20]
+		}
+		_ = s.db.SetDraftTags(draft.ID, req.Tags)
+	}
 
 	status := http.StatusCreated
 	if !created {
