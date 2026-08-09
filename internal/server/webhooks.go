@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
+	"github.com/10xdev4u-alt/princedotdev/internal/digest"
 )
 
 // Webhook events. A webhook's Events column holds a comma-separated subset.
@@ -19,10 +20,11 @@ const (
 	evUpload  = "upload"
 	evComment = "comment"
 	evStatus  = "status"
+	evDigest  = "digest"
 )
 
 var validWebhookKinds = map[string]bool{"discord": true, "slack": true, "generic": true}
-var validWebhookEvents = map[string]bool{evUpload: true, evComment: true, evStatus: true}
+var validWebhookEvents = map[string]bool{evUpload: true, evComment: true, evStatus: true, evDigest: true}
 
 // webhookEvent is the notification payload for a single trigger.
 type webhookEvent struct {
@@ -34,6 +36,7 @@ type webhookEvent struct {
 	Comment       *db.Comment
 	FromStatus    string
 	ToStatus      string
+	Digest        *digest.Summary
 }
 
 // fireWebhooks delivers ev to every webhook subscribed to its event type and
@@ -125,6 +128,9 @@ func buildWebhookPayload(kind string, ev webhookEvent) []byte {
 			"versionNumber": ev.Comment.VersionNumber,
 		}
 	}
+	if ev.Digest != nil {
+		base["digest"] = ev.Digest
+	}
 	switch kind {
 	case "discord":
 		return mustJSON(discordPayload(ev))
@@ -153,6 +159,9 @@ func draftPayload(d *db.Draft, teamName string) map[string]any {
 // event-specific color + emoji, humanized status, team name, and context
 // fields. The whole thing is human-scannable at a glance.
 func discordPayload(ev webhookEvent) map[string]any {
+	if ev.Digest != nil {
+		return digest.DiscordPayload(ev.Digest)
+	}
 	title := draftTitle(ev)
 	embed := map[string]any{
 		"title":       title,
@@ -169,6 +178,9 @@ func discordPayload(ev webhookEvent) map[string]any {
 }
 
 func slackPayload(ev webhookEvent) map[string]any {
+	if ev.Digest != nil {
+		return digest.SlackPayload(ev.Digest)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "*%s*\n%s", draftTitle(ev), eventLine(ev))
 	if ev.TeamName != "" {
@@ -189,7 +201,7 @@ func slackPayload(ev webhookEvent) map[string]any {
 }
 
 func draftTitle(ev webhookEvent) string {
-	if ev.Draft.Title == "" {
+	if ev.Draft == nil || ev.Draft.Title == "" {
 		return "Untitled Draft"
 	}
 	return ev.Draft.Title

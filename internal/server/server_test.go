@@ -993,3 +993,90 @@ func TestWebhookDeliveryHistory(t *testing.T) {
 		t.Fatalf("cascade failed: %d rows err %v", len(rows), err)
 	}
 }
+
+func TestDailyDigest(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	ownerID, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, ownerTok, _ := d.CreateAPIKey(ownerID, "cli")
+	h := s.Handler()
+
+	team, _ := d.CreateTeam("Core", ownerID)
+	teamID := team.ID
+	_ = d.UpdateTeamApprovals(teamID, 2)
+
+	// a draft stuck in review
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "d.html", "teamId": teamID}, ownerTok)
+	draftID := up["draftId"].(string)
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "in_review"}, ownerTok)
+
+	// receiver for the digest webhook
+	var got map[string]any
+	var mu sync.Mutex
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		got = body
+		mu.Unlock()
+		w.WriteHeader(204)
+	}))
+	defer ts.Close()
+
+	// digest-subscribed webhook + one that isn't
+	_, resp := doJSON(t, h, "POST", "/api/webhooks", map[string]any{"name": "digest chan", "kind": "discord", "url": ts.URL, "events": []string{"digest"}, "teamId": teamID}, ownerTok)
+	whID := resp["webhook"].(map[string]any)["id"].(string)
+	_, resp2 := doJSON(t, h, "POST", "/api/webhooks", map[string]any{"name": "plain chan", "kind": "discord", "url": ts.URL, "events": []string{"upload"}, "teamId": teamID}, ownerTok)
+	_ = resp2
+
+	// manual send-digest (on the digest webhook)
+	rec, _ := doJSON(t, h, "POST", "/api/webhooks/"+whID+"/send-digest", nil, ownerTok)
+	if rec.Code != 200 {
+		t.Fatalf("send-digest %d", rec.Code)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		ok := got != nil
+		mu.Unlock()
+		if ok {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got == nil {
+		t.Fatal("digest webhook never received a payload")
+	}
+	if got["event"] != "digest" {
+		t.Fatalf("event %v", got["event"])
+	}
+	embeds := got["embeds"].([]any)
+	title := embeds[0].(map[string]any)["title"].(string)
+	if !strings.Contains(title, "Core") {
+		t.Fatalf("title %q", title)
+	}
+	fields := embeds[0].(map[string]any)["fields"].([]any)
+	if len(fields) != 1 {
+		t.Fatalf("fields %v", fields)
+	}
+	value := fields[0].(map[string]any)["value"].(string)
+	if !strings.Contains(value, "0/2 approved") {
+		t.Fatalf("value %q", value)
+	}
+
+	// last_digest_at stamped so the scheduler doesn't re-send
+	last, _ := d.GetTeamLastDigest(teamID)
+	if last == "" {
+		t.Fatal("last_digest_at not stamped")
+	}
+
+	// personal webhook (no team) cannot send a digest
+	_, resp3 := doJSON(t, h, "POST", "/api/webhooks", map[string]any{"name": "personal", "kind": "discord", "url": ts.URL, "events": []string{"digest"}}, ownerTok)
+	perID := resp3["webhook"].(map[string]any)["id"].(string)
+	rec, _ = doJSON(t, h, "POST", "/api/webhooks/"+perID+"/send-digest", nil, ownerTok)
+	if rec.Code != 400 {
+		t.Fatalf("personal digest status %d, want 400", rec.Code)
+	}
+}

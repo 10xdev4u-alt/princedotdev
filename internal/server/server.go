@@ -15,12 +15,13 @@ import (
 
 // Server wires the store, database, and HTTP routes together.
 type Server struct {
-	cfg       config.Config
-	db        *db.DB
-	store     *store.Store
-	rl        *rateLimiter
-	dashboard *web.DashboardHandler
-	mux       *http.ServeMux
+	cfg        config.Config
+	db         *db.DB
+	store      *store.Store
+	rl         *rateLimiter
+	dashboard  *web.DashboardHandler
+	mux        *http.ServeMux
+	digestStop chan struct{}
 }
 
 // New opens the database + store and builds the route table.
@@ -36,18 +37,23 @@ func New(cfg config.Config) (*Server, error) {
 	web.Init(cfg.PublicBaseURL)
 	publicDraftURL = strings.TrimRight(cfg.PublicBaseURL, "/")
 	s := &Server{
-		cfg:   cfg,
-		db:    d,
-		store: st,
-		rl:    newRateLimiter(cfg.UploadRateLimitWindowMs, cfg.UploadRateLimitMax),
-		mux:   http.NewServeMux(),
+		cfg:        cfg,
+		db:         d,
+		store:      st,
+		rl:         newRateLimiter(cfg.UploadRateLimitWindowMs, cfg.UploadRateLimitMax),
+		mux:        http.NewServeMux(),
+		digestStop: make(chan struct{}),
 	}
 	s.routes()
+	go s.digestLoop()
 	return s, nil
 }
 
-// Close releases the database handle.
-func (s *Server) Close() error { return s.db.Close() }
+// Close stops background loops and releases the database handle.
+func (s *Server) Close() error {
+	close(s.digestStop)
+	return s.db.Close()
+}
 
 // Checkpoint flushes the WAL into the main database file (used on graceful
 // shutdown so volume snapshots are complete).
@@ -108,6 +114,7 @@ func (s *Server) routes() {
 	m.Handle("DELETE /api/webhooks/{webhookId}", s.requireAuth(s.handleDeleteWebhook))
 	m.Handle("GET /api/webhooks/{webhookId}/deliveries", s.requireAuth(s.handleListDeliveries))
 	m.Handle("POST /api/webhooks/{webhookId}/test", s.requireAuth(s.handleTestWebhook))
+	m.Handle("POST /api/webhooks/{webhookId}/send-digest", s.requireAuth(s.handleSendDigest))
 
 	// Uploads (anonymous allowed; auth resolved before rate limiting so the
 	// limiter can key on the API key when present).
