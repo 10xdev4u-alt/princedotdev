@@ -303,11 +303,17 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	from := draft.Status
 
 	// Approval gate: approving a team draft records the approver; the draft
-	// only flips to approved once the team's required count is reached.
+	// only flips to approved once the team's required count is reached. When
+	// reviewers are assigned, only their approvals count toward the gate.
 	if req.Status == "approved" && draft.TeamID != "" {
 		if team, err := s.db.FindTeam(draft.TeamID); err == nil && team.RequiredApprovals > 0 {
 			_ = s.db.AddDraftApproval(draft.ID, key.AccountID)
-			count, _ := s.db.ApprovalCount(draft.ID)
+			var count int64
+			if hasReviewers, _ := s.db.DraftHasReviewers(draft.ID); hasReviewers {
+				count, _ = s.db.ReviewerApprovalCount(draft.ID)
+			} else {
+				count, _ = s.db.ApprovalCount(draft.ID)
+			}
 			if count < team.RequiredApprovals {
 				_ = s.db.SetStatus(draft.ID, "in_review")
 				draft.Status = "in_review"
@@ -412,6 +418,19 @@ func (s *Server) decorateDraft(d *db.Draft) map[string]any {
 			count, _ := s.db.ApprovalCount(d.ID)
 			out["approvals"] = map[string]any{"count": count, "required": team.RequiredApprovals}
 		}
+	}
+	if reviewers, err := s.db.ListDraftReviewers(d.ID); err == nil && len(reviewers) > 0 {
+		status, _ := s.db.ReviewerApprovalStatus(d.ID)
+		list := make([]map[string]any, 0, len(reviewers))
+		for _, r := range reviewers {
+			list = append(list, map[string]any{
+				"accountId": r.AccountID,
+				"name":      r.Name,
+				"email":     r.Email,
+				"approved":  status[r.AccountID],
+			})
+		}
+		out["reviewers"] = list
 	}
 	return out
 }

@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS draft_approvals (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (draft_id, account_id)
 );
+CREATE TABLE IF NOT EXISTS draft_reviewers (
+  draft_id TEXT NOT NULL REFERENCES drafts(id),
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  added_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (draft_id, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_reviewers_draft ON draft_reviewers(draft_id);
 CREATE TABLE IF NOT EXISTS activity (
   id TEXT PRIMARY KEY,
   account_id TEXT REFERENCES accounts(id),
@@ -448,6 +456,83 @@ func (d *DB) ApprovalCount(draftID string) (int64, error) {
 	var n int64
 	err := d.sql.QueryRow(`SELECT COUNT(*) FROM draft_approvals WHERE draft_id = ?`, draftID).Scan(&n)
 	return n, err
+}
+
+// ReviewerApprovalCount returns approvals from accounts assigned as reviewers.
+// When reviewers are assigned, the approval gate counts only their approvals.
+func (d *DB) ReviewerApprovalCount(draftID string) (int64, error) {
+	var n int64
+	err := d.sql.QueryRow(`
+		SELECT COUNT(*) FROM draft_approvals a
+		JOIN draft_reviewers r ON r.draft_id = a.draft_id AND r.account_id = a.account_id
+		WHERE a.draft_id = ?`, draftID).Scan(&n)
+	return n, err
+}
+
+// SetDraftReviewers replaces the draft's assigned reviewers with accountIDs.
+func (d *DB) SetDraftReviewers(draftID string, accountIDs []string, addedBy string) error {
+	if _, err := d.sql.Exec(`DELETE FROM draft_reviewers WHERE draft_id = ?`, draftID); err != nil {
+		return err
+	}
+	for _, id := range accountIDs {
+		if _, err := d.sql.Exec(`
+			INSERT OR IGNORE INTO draft_reviewers (draft_id, account_id, added_by) VALUES (?, ?, ?)`,
+			draftID, id, addedBy); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListDraftReviewers returns the assigned reviewers (name + email) of a draft.
+func (d *DB) ListDraftReviewers(draftID string) ([]TeamMember, error) {
+	rows, err := d.sql.Query(`
+		SELECT r.account_id, a.name, COALESCE(a.email,''), ''
+		FROM draft_reviewers r JOIN accounts a ON a.id = r.account_id
+		WHERE r.draft_id = ? ORDER BY a.name ASC`, draftID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TeamMember
+	for rows.Next() {
+		var m TeamMember
+		if err := rows.Scan(&m.AccountID, &m.Name, &m.Email, &m.Role); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// DraftHasReviewers reports whether any reviewers are assigned to the draft.
+func (d *DB) DraftHasReviewers(draftID string) (bool, error) {
+	var n int64
+	err := d.sql.QueryRow(`SELECT COUNT(*) FROM draft_reviewers WHERE draft_id = ?`, draftID).Scan(&n)
+	return n > 0, err
+}
+
+// ReviewerApprovalStatus returns which assigned reviewers have approved.
+func (d *DB) ReviewerApprovalStatus(draftID string) (map[string]bool, error) {
+	rows, err := d.sql.Query(`
+		SELECT r.account_id, (a.account_id IS NOT NULL)
+		FROM draft_reviewers r
+		LEFT JOIN draft_approvals a ON a.draft_id = r.draft_id AND a.account_id = r.account_id
+		WHERE r.draft_id = ?`, draftID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		var approved bool
+		if err := rows.Scan(&id, &approved); err != nil {
+			return nil, err
+		}
+		out[id] = approved
+	}
+	return out, rows.Err()
 }
 
 // ListTeamDrafts returns the team's drafts (never deleted), newest first.

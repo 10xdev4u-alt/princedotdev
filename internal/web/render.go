@@ -258,6 +258,32 @@ var draftDetailTpl = template.Must(template.New("detail").Parse(`
     </form>
   </div>
 
+  <h2 id="reviewers">Reviewers</h2>
+  {{if .Reviewers}}
+    <div class="list">
+      {{range .Reviewers}}
+      <div class="row">
+        <div>{{.Name}} <span class="muted small">{{.Email}}</span></div>
+        <div class="row-meta">
+          {{if .Approved}}<span class="pill pill-approved">✓ approved</span>{{else}}<span class="pill pill-in_review">pending</span>{{end}}
+        </div>
+      </div>
+      {{end}}
+    </div>
+  {{else}}
+    <p class="muted small">No reviewers assigned — any team member's approval counts toward the gate.</p>
+  {{end}}
+  {{if .CanAssign}}
+  <form class="inline-form" method="post" action="/dashboard/drafts/{{.DraftID}}/reviewers" style="flex-wrap:wrap">
+    {{range .TeamMembers}}
+    <label class="muted small" style="display:flex;gap:6px;align-items:center">
+      <input type="checkbox" name="reviewers" value="{{.AccountID}}" {{if .Checked}}checked{{end}} /> {{.Name}}
+    </label>
+    {{end}}
+    <button class="linklike" type="submit">Save reviewers</button>
+  </form>
+  {{end}}
+
   <h2>Versions</h2>
   <p class="muted small"><a href="/dashboard/drafts/{{.DraftID}}/diff">Compare versions →</a></p>
   <table>
@@ -564,6 +590,20 @@ type commentRow struct {
 	Body          string
 	AnchorLabel   string
 	CreatedLabel  string
+}
+
+// reviewerRow is one assigned reviewer with their approval state.
+type reviewerRow struct {
+	Name     string
+	Email    string
+	Approved bool
+}
+
+// memberCheck is one team member in the reviewer picker.
+type memberCheck struct {
+	AccountID string
+	Name      string
+	Checked   bool
 }
 
 func formatDate(value string) string {

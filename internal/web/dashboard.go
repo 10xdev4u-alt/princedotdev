@@ -41,6 +41,7 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/comments", h.handlePostComment)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/status", h.handlePostStatus)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/tags", h.handleDraftTags)
+	mux.HandleFunc("POST /dashboard/drafts/{draftId}/reviewers", h.handleDraftReviewers)
 	mux.HandleFunc("GET /cli/auth", h.handleCLIAuth)
 	mux.HandleFunc("POST /cli/auth/keys", h.handleMintKey)
 	mux.HandleFunc("GET /dashboard/settings", h.handleSettings)
@@ -270,6 +271,31 @@ func (h *DashboardHandler) handleDraftPage(w http.ResponseWriter, r *http.Reques
 			CreatedLabel:  formatDate(c.CreatedAt),
 		})
 	}
+	reviewers, _ := h.db.ListDraftReviewers(draft.ID)
+	apprStatus, _ := h.db.ReviewerApprovalStatus(draft.ID)
+	rRows := make([]reviewerRow, 0, len(reviewers))
+	assigned := map[string]bool{}
+	for _, rv := range reviewers {
+		assigned[rv.AccountID] = true
+		rRows = append(rRows, reviewerRow{
+			Name:     rv.Name,
+			Email:    rv.Email,
+			Approved: apprStatus[rv.AccountID],
+		})
+	}
+	canAssign := h.canAssignReviewers(draft, session)
+	var memberRows []memberCheck
+	if draft.TeamID != "" {
+		if members, err := h.db.ListTeamMembers(draft.TeamID); err == nil {
+			for _, m := range members {
+				memberRows = append(memberRows, memberCheck{
+					AccountID: m.AccountID,
+					Name:      m.Name,
+					Checked:   assigned[m.AccountID],
+				})
+			}
+		}
+	}
 	body := template.HTML(execOrEmpty(draftDetailTpl, map[string]any{
 		"DraftID":     draft.ID,
 		"Title":       draft.Title,
@@ -280,12 +306,74 @@ func (h *DashboardHandler) handleDraftPage(w http.ResponseWriter, r *http.Reques
 		"StatusLabel": statusLabel(draft.Status),
 		"Versions":    vRows,
 		"Comments":    cRows,
+		"Reviewers":   rRows,
+		"CanAssign":   canAssign,
+		"TeamMembers": memberRows,
 	}))
 	h.writePage(w, http.StatusOK, Page{
 		Title:  draft.Title + " — draftdeck",
 		Header: h.header(session, "dashboard"),
 		Body:   body,
 	})
+}
+
+// canAssignReviewers reports whether the session may change reviewers:
+// the draft owner, or a team owner/admin for team drafts.
+func (h *DashboardHandler) canAssignReviewers(draft *db.Draft, session *Session) bool {
+	if session == nil {
+		return false
+	}
+	if draft.AccountID == session.AccountID {
+		return true
+	}
+	if draft.TeamID == "" {
+		return false
+	}
+	ok, _ := h.db.IsTeamAdmin(draft.TeamID, session.AccountID)
+	return ok
+}
+
+func (h *DashboardHandler) handleDraftReviewers(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	draft, err := h.db.FindDraft(r.PathValue("draftId"))
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load draft.")
+		return
+	}
+	if draft == nil || draft.DeletedAt != "" {
+		h.writeError(w, http.StatusNotFound, "Draft not found.")
+		return
+	}
+	if !h.canView(draft, session) {
+		h.writeError(w, http.StatusForbidden, "You don't have access to this draft.")
+		return
+	}
+	if !h.canAssignReviewers(draft, session) {
+		h.writeError(w, http.StatusForbidden, "Only the draft owner or a team owner/admin can assign reviewers.")
+		return
+	}
+	var ids []string
+	for _, id := range r.Form["reviewers"] {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if draft.TeamID != "" {
+			if ok, _ := h.db.IsTeamMember(draft.TeamID, id); !ok {
+				h.writeError(w, http.StatusBadRequest, "Reviewers must be team members.")
+				return
+			}
+		}
+		ids = append(ids, id)
+	}
+	if err := h.db.SetDraftReviewers(draft.ID, ids, session.AccountID); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not save reviewers.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/drafts/"+draft.ID+"#reviewers", http.StatusFound)
 }
 
 // diffLine is one rendered line of the diff page.
