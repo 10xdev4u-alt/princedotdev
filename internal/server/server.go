@@ -106,6 +106,7 @@ func (s *Server) routes() {
 	m.Handle("GET /api/webhooks", s.requireAuth(s.handleListWebhooks))
 	m.Handle("POST /api/webhooks", s.requireAuth(s.handleCreateWebhook))
 	m.Handle("DELETE /api/webhooks/{webhookId}", s.requireAuth(s.handleDeleteWebhook))
+	m.Handle("GET /api/webhooks/{webhookId}/deliveries", s.requireAuth(s.handleListDeliveries))
 	m.Handle("POST /api/webhooks/{webhookId}/test", s.requireAuth(s.handleTestWebhook))
 
 	// Uploads (anonymous allowed; auth resolved before rate limiting so the

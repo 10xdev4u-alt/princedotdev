@@ -67,7 +67,7 @@ func (s *Server) fireWebhooks(ev webhookEvent) {
 			continue
 		}
 		w := h
-		go s.deliverWebhook(w, buildWebhookPayload(w.Kind, ev))
+		go s.deliverWebhook(w, ev.Event, buildWebhookPayload(w.Kind, ev))
 	}
 }
 
@@ -81,8 +81,8 @@ func wantsEvent(h db.Webhook, ev string) bool {
 }
 
 // deliverWebhook POSTs the payload with bounded retries (3 attempts, 500ms
-// base backoff) and records the outcome.
-func (s *Server) deliverWebhook(h db.Webhook, payload []byte) {
+// base backoff) and records the outcome (last-result + history log).
+func (s *Server) deliverWebhook(h db.Webhook, event string, payload []byte) {
 	status := 0
 	var errMsg string
 	for attempt := 1; attempt <= 3; attempt++ {
@@ -94,6 +94,7 @@ func (s *Server) deliverWebhook(h db.Webhook, payload []byte) {
 		time.Sleep(time.Duration(attempt) * 500 * time.Millisecond)
 	}
 	_ = s.db.SetWebhookResult(h.ID, status, errMsg)
+	_ = s.db.RecordWebhookDelivery(h.ID, event, status, errMsg)
 }
 
 func postJSON(target string, payload []byte) (int, string) {
@@ -435,6 +436,32 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// handleListDeliveries returns a webhook's delivery history (newest first).
+func (s *Server) handleListDeliveries(w http.ResponseWriter, r *http.Request) {
+	key := authFrom(r)
+	wh, err := s.db.FindWebhook(r.PathValue("webhookId"))
+	if err != nil || wh == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"ok": false, "error": "Webhook not found."})
+		return
+	}
+	if !s.canManageWebhook(*wh, key) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "You don't have access to this webhook."})
+		return
+	}
+	limit := 20
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	deliveries, err := s.db.ListWebhookDeliveries(wh.ID, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deliveries": deliveries})
+}
+
 func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	key := authFrom(r)
 	wh, err := s.db.FindWebhook(r.PathValue("webhookId"))
@@ -453,6 +480,7 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	status, errMsg := postJSON(wh.URL, buildWebhookPayload(wh.Kind, ev))
 	_ = s.db.SetWebhookResult(wh.ID, status, errMsg)
+	_ = s.db.RecordWebhookDelivery(wh.ID, "test", status, errMsg)
 	if status >= 200 && status < 300 {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": status})
 		return

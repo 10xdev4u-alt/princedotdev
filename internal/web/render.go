@@ -555,6 +555,27 @@ var settingsTpl = template.Must(template.New("settings").Parse(`
         </div>
       </td>
     </tr>
+    <tr>
+      <td colspan="5">
+        <details class="muted small">
+          <summary style="cursor:pointer">Delivery history ({{len .Deliveries}})</summary>
+          {{if .Deliveries}}
+          <table style="margin:6px 0">
+            <tr><th>When</th><th>Event</th><th>Status</th></tr>
+            {{range .Deliveries}}
+            <tr>
+              <td class="muted">{{.TimeLabel}}</td>
+              <td><code>{{.Event}}</code></td>
+              <td>{{if .OK}}<span class="pill pill-approved">{{.Status}}</span>{{else}}<span class="pill pill-changes_requested">{{.StatusLabel}}</span>{{end}}</td>
+            </tr>
+            {{end}}
+          </table>
+          {{else}}
+          <p class="muted small">No deliveries yet — hit Test or trigger an event.</p>
+          {{end}}
+        </details>
+      </td>
+    </tr>
     {{end}}
   </table>
   {{else}}
