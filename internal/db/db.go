@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS comments (
   author TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS draft_tags (
+  draft_id TEXT NOT NULL REFERENCES drafts(id),
+  tag TEXT NOT NULL,
+  PRIMARY KEY (draft_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_tags_tag ON draft_tags(tag);
 CREATE TABLE IF NOT EXISTS draft_approvals (
   draft_id TEXT NOT NULL REFERENCES drafts(id),
   account_id TEXT NOT NULL REFERENCES accounts(id),
@@ -840,6 +846,95 @@ func (d *DB) RemoveTeamMember(teamID, accountID string) error {
 		`DELETE FROM team_members WHERE team_id = ? AND account_id = ? AND role != 'owner'`,
 		teamID, accountID)
 	return err
+}
+
+// ---- tags ---------------------------------------------------------------------------
+
+// SetDraftTags replaces the tags on a draft (lowercased, deduped).
+func (d *DB) SetDraftTags(draftID string, tags []string) error {
+	if _, err := d.sql.Exec(`DELETE FROM draft_tags WHERE draft_id = ?`, draftID); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		if _, err := d.sql.Exec(`INSERT OR IGNORE INTO draft_tags (draft_id, tag) VALUES (?, ?)`, draftID, t); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DraftTags returns a draft's tags, sorted.
+func (d *DB) DraftTags(draftID string) ([]string, error) {
+	rows, err := d.sql.Query(`SELECT tag FROM draft_tags WHERE draft_id = ? ORDER BY tag`, draftID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// TagsForDrafts returns a draftID → sorted tags map for the given drafts.
+func (d *DB) TagsForDrafts(draftIDs []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(draftIDs) == 0 {
+		return out, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(draftIDs)), ",")
+	args := make([]any, 0, len(draftIDs))
+	for _, id := range draftIDs {
+		args = append(args, id)
+	}
+	rows, err := d.sql.Query(`SELECT draft_id, tag FROM draft_tags WHERE draft_id IN (`+placeholders+`) ORDER BY tag`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var did, tag string
+		if err := rows.Scan(&did, &tag); err != nil {
+			return nil, err
+		}
+		out[did] = append(out[did], tag)
+	}
+	return out, rows.Err()
+}
+
+// AllTagsForAccount returns every tag used across the account's drafts
+// (including team drafts), for filter dropdowns.
+func (d *DB) AllTagsForAccount(accountID string) ([]string, error) {
+	rows, err := d.sql.Query(`
+		SELECT DISTINCT t.tag FROM draft_tags t
+		JOIN drafts dr ON dr.id = t.draft_id
+		LEFT JOIN team_members tm ON tm.team_id = dr.team_id
+		WHERE dr.deleted_at IS NULL AND (dr.account_id = ? OR tm.account_id = ?)
+		ORDER BY t.tag`, accountID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		out = append(out, tag)
+	}
+	return out, rows.Err()
 }
 
 // ---- comments ---------------------------------------------------------------------

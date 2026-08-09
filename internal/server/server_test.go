@@ -682,3 +682,66 @@ func TestRolesAndApprovals(t *testing.T) {
 		t.Fatalf("final status %v", out2["draft"])
 	}
 }
+
+func TestTagsAndFilters(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+
+	_, up := doJSON(t, h, "POST", "/api/uploads",
+		map[string]any{"html": testHTML, "filename": "a.html", "description": "Q3 retry automation", "tags": []string{"q3", "agents"}}, token)
+	draftA := up["draftId"].(string)
+	_, up2 := doJSON(t, h, "POST", "/api/uploads",
+		map[string]any{"html": testHTML, "filename": "b.html", "description": "Billing dunning", "tags": []string{"q3"}}, token)
+	draftB := up2["draftId"].(string)
+	doJSON(t, h, "POST", "/api/drafts/"+draftB+"/status", map[string]any{"status": "approved"}, token)
+
+	// tags in list responses
+	_, all := doJSON(t, h, "GET", "/api/drafts", nil, token)
+	drafts := all["drafts"].([]any)
+	if len(drafts) != 2 {
+		t.Fatalf("all %d", len(drafts))
+	}
+	found := map[string][]any{}
+	for _, raw := range drafts {
+		it := raw.(map[string]any)
+		found[it["draftId"].(string)] = it["tags"].([]any)
+	}
+	if len(found[draftA]) != 2 || len(found[draftB]) != 1 {
+		t.Fatalf("tags %v", found)
+	}
+
+	// filter by status
+	_, byStatus := doJSON(t, h, "GET", "/api/drafts?status=approved", nil, token)
+	if n := len(byStatus["drafts"].([]any)); n != 1 {
+		t.Fatalf("status filter %d", n)
+	}
+	// filter by tag
+	_, byTag := doJSON(t, h, "GET", "/api/drafts?tag=agents", nil, token)
+	if n := len(byTag["drafts"].([]any)); n != 1 {
+		t.Fatalf("tag filter %d", n)
+	}
+	// search
+	_, byQ := doJSON(t, h, "GET", "/api/drafts?q=dunning", nil, token)
+	if n := len(byQ["drafts"].([]any)); n != 1 {
+		t.Fatalf("q filter %d", n)
+	}
+
+	// replace tags via PUT
+	if rec, out := doJSON(t, h, "PUT", "/api/drafts/"+draftA+"/tags", map[string]any{"tags": []string{"q3", "recovery"}}, token); rec.Code != 200 || len(out["tags"].([]any)) != 2 {
+		t.Fatalf("put tags %d %v", rec.Code, out)
+	}
+	_, detail := doJSON(t, h, "GET", "/api/drafts/"+draftA, nil, token)
+	if tags := detail["tags"].([]any); len(tags) != 2 {
+		t.Fatalf("detail tags %v", tags)
+	}
+	// cleared tags drop out of tag filter
+	if rec, _ := doJSON(t, h, "PUT", "/api/drafts/"+draftA+"/tags", map[string]any{"tags": []string{}}, token); rec.Code != 200 {
+		t.Fatalf("clear tags %d", rec.Code)
+	}
+	_, byTag2 := doJSON(t, h, "GET", "/api/drafts?tag=agents", nil, token)
+	if n := len(byTag2["drafts"].([]any)); n != 0 {
+		t.Fatalf("tag after clear %d", n)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -85,8 +86,9 @@ Usage:
   draftdeck auth whoami [--api-url <url>]          check credentials
   draftdeck upload <file> [--draft <id>] [--new]   publish or update a draft
                 [--description <text>] [--visibility public|unlisted|team]
-                [--team <team-id>] [--api-url <url>]
-  draftdeck list [--json] [--api-url <url>]        list drafts
+                [--team <team-id>] [--tags a,b] [--api-url <url>]
+  draftdeck list [--json] [--status <s>] [--tag <t>] [--q <text>]
+                [--api-url <url>]                   list drafts (filterable)
   draftdeck comments <draft-id> [--post <text>]    read or post feedback
                 [--selector <css>] [--version <n>]
   draftdeck status <draft-id> <status>             draft|in_review|changes_requested|approved
@@ -172,6 +174,7 @@ func cmdUpload(args []string) error {
 	description := fs.String("description", "", "Short description for the draft")
 	visibility := fs.String("visibility", "", "public, unlisted, or team (default: unlisted)")
 	teamID := fs.String("team", "", "Attach the draft to a team (implies team visibility)")
+	tags := fs.String("tags", "", "Comma-separated tags for the draft")
 	apiURL := fs.String("api-url", "", "Override the API base URL")
 	positionals, err := parseFlags(fs, map[string]bool{"new": true}, args)
 	if err != nil {
@@ -221,6 +224,12 @@ func cmdUpload(args []string) error {
 		vis = "team"
 	}
 	meta := collectGitMetadata(filepath.Dir(resolved))
+	var tagList []string
+	for _, part := range strings.Split(*tags, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			tagList = append(tagList, t)
+		}
+	}
 	payload := map[string]any{
 		"html":        string(html),
 		"filename":    path.Base(resolved),
@@ -228,6 +237,7 @@ func cmdUpload(args []string) error {
 		"description": nullIfEmpty(*description),
 		"visibility":  nullIfEmpty(vis),
 		"teamId":      nullIfEmpty(*teamID),
+		"tags":        tagList,
 		"metadata": map[string]any{
 			"cliVersion":       Version,
 			"gitBranch":        nullIfEmpty(meta.Branch),
@@ -277,12 +287,29 @@ func cmdUpload(args []string) error {
 func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "Print raw JSON")
+	status := fs.String("status", "", "Filter by status: draft|in_review|changes_requested|approved")
+	tag := fs.String("tag", "", "Filter by tag")
+	q := fs.String("q", "", "Search title and description")
 	apiURL := fs.String("api-url", "", "Override the API base URL")
 	if _, err := parseFlags(fs, map[string]bool{"json": true}, args); err != nil {
 		return err
 	}
 	auth := readAuth(*apiURL, true)
-	body, err := apiCall(auth.apiURL, "GET", "/api/drafts", nil, auth.apiKey)
+	path := "/api/drafts"
+	var qs []string
+	if *status != "" {
+		qs = append(qs, "status="+url.QueryEscape(*status))
+	}
+	if *tag != "" {
+		qs = append(qs, "tag="+url.QueryEscape(*tag))
+	}
+	if *q != "" {
+		qs = append(qs, "q="+url.QueryEscape(*q))
+	}
+	if len(qs) > 0 {
+		path += "?" + strings.Join(qs, "&")
+	}
+	body, err := apiCall(auth.apiURL, "GET", path, nil, auth.apiKey)
 	if err != nil {
 		return err
 	}

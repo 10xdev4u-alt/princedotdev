@@ -66,6 +66,7 @@ func (s *Server) routes() {
 	// Drafts: list, detail, comments, review status
 	m.Handle("GET /api/drafts", s.requireAuth(s.handleListDrafts))
 	m.Handle("GET /api/drafts/{draftId}", s.requireAuth(s.handleDraftDetail))
+	m.Handle("PUT /api/drafts/{draftId}/tags", s.requireAuth(s.handleSetDraftTags))
 	m.Handle("GET /api/drafts/{draftId}/comments", s.noStore(http.HandlerFunc(s.handleListComments)))
 	m.Handle("POST /api/drafts/{draftId}/comments", s.requireAuth(s.handleAddComment))
 	m.Handle("POST /api/drafts/{draftId}/status", s.requireAuth(s.handleSetStatus))

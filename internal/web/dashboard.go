@@ -35,6 +35,7 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /dashboard/drafts/{draftId}", h.handleDraftPage)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/comments", h.handlePostComment)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/status", h.handlePostStatus)
+	mux.HandleFunc("POST /dashboard/drafts/{draftId}/tags", h.handleDraftTags)
 	mux.HandleFunc("GET /cli/auth", h.handleCLIAuth)
 	mux.HandleFunc("POST /cli/auth/keys", h.handleMintKey)
 	mux.HandleFunc("GET /dashboard/settings", h.handleSettings)
@@ -72,8 +73,47 @@ func (h *DashboardHandler) handleDashboard(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusInternalServerError, "Could not load teams.")
 		return
 	}
-	rows := make([]draftRow, 0, len(items))
+	// Filters: ?q=, &status=, &tag=, &teamId=
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	fStatus := r.URL.Query().Get("status")
+	fTag := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("tag")))
+	fTeam := r.URL.Query().Get("teamId")
+	ids := make([]string, 0, len(items))
+	filtered := items[:0]
 	for _, it := range items {
+		if fStatus != "" && it.Status != fStatus {
+			continue
+		}
+		if fTeam != "" && it.TeamID != fTeam {
+			continue
+		}
+		if q != "" && !strings.Contains(strings.ToLower(it.Title), q) && !strings.Contains(strings.ToLower(it.Description), q) {
+			continue
+		}
+		ids = append(ids, it.DraftID)
+		filtered = append(filtered, it)
+	}
+	tagsByDraft, err := h.db.TagsForDrafts(ids)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load tags.")
+		return
+	}
+	if fTag != "" {
+		kept := filtered[:0]
+		for _, it := range filtered {
+			if hasTag(tagsByDraft[it.DraftID], fTag) {
+				kept = append(kept, it)
+			}
+		}
+		filtered = kept
+	}
+	allTags, err := h.db.AllTagsForAccount(session.AccountID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load tags.")
+		return
+	}
+	rows := make([]draftRow, 0, len(filtered))
+	for _, it := range filtered {
 		latest := "—"
 		if it.LatestVersionNumber > 0 {
 			latest = itoa(it.LatestVersionNumber)
@@ -88,6 +128,7 @@ func (h *DashboardHandler) handleDashboard(w http.ResponseWriter, r *http.Reques
 			LatestLabel:  latest,
 			VersionCount: it.VersionCount,
 			UpdatedLabel: formatDate(it.UpdatedAt),
+			Tags:         tagsByDraft[it.DraftID],
 		})
 	}
 	activity, err := h.db.ListActivity(session.AccountID, 20)
@@ -124,6 +165,11 @@ func (h *DashboardHandler) handleDashboard(w http.ResponseWriter, r *http.Reques
 		"Teams":    teams,
 		"Activity": aRows,
 		"Unread":   unread,
+		"Query":    r.URL.Query().Get("q"),
+		"FStatus":  fStatus,
+		"FTag":     fTag,
+		"FTeam":    fTeam,
+		"AllTags":  allTags,
 	}))
 	h.writePage(w, http.StatusOK, Page{
 		Title:  "My drafts — draftdeck",
@@ -191,6 +237,11 @@ func (h *DashboardHandler) handleDraftPage(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusInternalServerError, "Could not load comments.")
 		return
 	}
+	tags, err := h.db.DraftTags(draft.ID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load tags.")
+		return
+	}
 	vRows := make([]versionRow, 0, len(versions))
 	for _, v := range versions {
 		vRows = append(vRows, versionRow{
@@ -219,6 +270,7 @@ func (h *DashboardHandler) handleDraftPage(w http.ResponseWriter, r *http.Reques
 		"Title":       draft.Title,
 		"Description": draft.Description,
 		"Visibility":  draft.Visibility,
+		"Tags":        tags,
 		"Status":      draft.Status,
 		"StatusLabel": statusLabel(draft.Status),
 		"Versions":    vRows,
@@ -365,6 +417,36 @@ func (h *DashboardHandler) handleMintKey(w http.ResponseWriter, r *http.Request)
 
 // ---- settings (control panel) ------------------------------------------------
 
+// handleDraftTags saves tags from the draft detail page.
+func (h *DashboardHandler) handleDraftTags(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	draftID := r.PathValue("draftId")
+	draft, err := h.db.FindDraft(draftID)
+	if err != nil || draft == nil || draft.DeletedAt != "" {
+		h.writeError(w, http.StatusNotFound, "Draft not found.")
+		return
+	}
+	if !h.canView(draft, session) {
+		h.writeError(w, http.StatusForbidden, "You don't have access to this draft.")
+		return
+	}
+	raw := r.FormValue("tags")
+	var tags []string
+	for _, part := range strings.Split(raw, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	if err := h.db.SetDraftTags(draftID, tags); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not save tags.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/drafts/"+draftID, http.StatusFound)
+}
+
 func (h *DashboardHandler) handleMarkActivityRead(w http.ResponseWriter, r *http.Request) {
 	session := h.requireSession(w, r)
 	if session == nil {
@@ -375,6 +457,15 @@ func (h *DashboardHandler) handleMarkActivityRead(w http.ResponseWriter, r *http
 		return
 	}
 	http.Redirect(w, r, "/dashboard#activity", http.StatusFound)
+}
+
+func hasTag(tags []string, want string) bool {
+	for _, t := range tags {
+		if t == want {
+			return true
+		}
+	}
+	return false
 }
 
 func activityLabel(kind string) string {

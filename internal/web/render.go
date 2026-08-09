@@ -77,6 +77,7 @@ const pageCSS = `<!doctype html>
   .pill-approved{background:#2a4a33;color:var(--nord14);border:1px solid #3d6b4c}
   .pill-team{background:#352a4a;color:var(--nord15);border:1px solid #4d3d6b}
   .pill-warn{background:#4a3a23;color:var(--nord13)}
+  .pill-tag{background:#23364a;color:var(--nord8);border:1px solid var(--nord9)}
   .status-actions{display:flex;gap:10px;margin:18px 0;flex-wrap:wrap}
   table{width:100%;border-collapse:collapse;margin-top:10px}
   th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--nord2);font-size:13px}
@@ -133,13 +134,30 @@ var headerTpl = template.Must(template.New("header").Parse(`
 var dashboardTpl = template.Must(template.New("dashboard").Parse(`
 <main>
   <h1>My drafts</h1>
-  <div class="filters">
-    <button class="filter-btn active" data-filter="all">All</button>
-    <button class="filter-btn" data-filter="draft">Draft</button>
-    <button class="filter-btn" data-filter="in_review">In review</button>
-    <button class="filter-btn" data-filter="changes_requested">Changes requested</button>
-    <button class="filter-btn" data-filter="approved">Approved</button>
-  </div>
+  <form class="inline-form" method="get" action="/dashboard" style="flex-wrap:wrap;margin:10px 0">
+    <input class="text inline" type="search" name="q" placeholder="Search drafts…" value="{{.Query}}" style="width:220px" />
+    <select class="text inline" name="status" style="width:auto">
+      <option value="">All statuses</option>
+      <option value="draft" {{if eq .FStatus "draft"}}selected{{end}}>Draft</option>
+      <option value="in_review" {{if eq .FStatus "in_review"}}selected{{end}}>In review</option>
+      <option value="changes_requested" {{if eq .FStatus "changes_requested"}}selected{{end}}>Changes requested</option>
+      <option value="approved" {{if eq .FStatus "approved"}}selected{{end}}>Approved</option>
+    </select>
+    {{if .AllTags}}
+    <select class="text inline" name="tag" style="width:auto">
+      <option value="">All tags</option>
+      {{range .AllTags}}<option value="{{.}}" {{if eq $.FTag .}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    {{end}}
+    {{if .Teams}}
+    <select class="text inline" name="teamId" style="width:auto">
+      <option value="">All teams</option>
+      {{range .Teams}}<option value="{{.ID}}" {{if eq $.FTeam .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    {{end}}
+    <button class="button" type="submit">Filter</button>
+    {{if or .Query .FStatus .FTag .FTeam}}<a class="linklike" href="/dashboard">clear</a>{{end}}
+  </form>
   <div class="list">
     {{if .Drafts}}
       {{range .Drafts}}
@@ -148,13 +166,14 @@ var dashboardTpl = template.Must(template.New("dashboard").Parse(`
           <a class="row-title" href="/dashboard/drafts/{{.DraftID}}">{{.Title}}</a>
           <span class="pill pill-{{.Status}}">{{.StatusLabel}}</span>
           {{if eq .Visibility "team"}}<span class="pill pill-team">team</span>{{end}}
+          {{range .Tags}}<span class="pill pill-tag">{{.}}</span>{{end}}
           {{if .Description}}<div class="muted small">{{.Description}}</div>{{end}}
         </div>
         <div class="row-meta muted small">v{{.LatestLabel}} · {{.VersionCount}} version{{if ne .VersionCount 1}}s{{end}} · {{.UpdatedLabel}}</div>
       </div>
       {{end}}
     {{else}}
-      <p class="muted">No drafts yet. Publish one with <code>draftdeck upload plan.html</code>.</p>
+      <p class="muted">No drafts match. Publish one with <code>draftdeck upload plan.html</code>.</p>
     {{end}}
   </div>
   <h2>Teams</h2>
@@ -186,21 +205,7 @@ var dashboardTpl = template.Must(template.New("dashboard").Parse(`
   {{else}}
   <p class="muted">Nothing yet — uploads, comments, and status changes land here.</p>
   {{end}}
-</main>
-<script>
-  document.querySelectorAll(".filter-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".filter-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      const status = btn.dataset.filter;
-      document.querySelectorAll(".row").forEach((row) => {
-        const pill = row.querySelector(".pill");
-        const s = pill ? pill.textContent.trim().toLowerCase().replace(/\s+/g, "_") : "";
-        row.style.display = status === "all" || s === status ? "" : "none";
-      });
-    });
-  });
-</script>`))
+</main>`))
 
 var draftDetailTpl = template.Must(template.New("detail").Parse(`
 <main>
@@ -211,6 +216,13 @@ var draftDetailTpl = template.Must(template.New("detail").Parse(`
     {{if eq .Visibility "team"}}<span class="pill pill-team">team</span>{{end}}
   </div>
   {{if .Description}}<p class="muted">{{.Description}}</p>{{end}}
+  <div class="tags small">
+    {{range .Tags}}<span class="pill pill-tag">{{.}}</span>{{end}}
+    <form class="inline-form" method="post" action="/dashboard/drafts/{{.DraftID}}/tags">
+      <input class="text inline" type="text" name="tags" placeholder="add tags (comma-separated)" style="width:240px" />
+      <button class="linklike" type="submit">Save tags</button>
+    </form>
+  </div>
   <div class="links small">
     <a href="/d/{{.DraftID}}" target="_blank" rel="noopener noreferrer">Open draft ↗</a> ·
     <a href="/d/{{.DraftID}}/raw" target="_blank" rel="noopener noreferrer">Raw HTML ↗</a> ·
@@ -476,6 +488,7 @@ type draftRow struct {
 	LatestLabel  string
 	VersionCount int64
 	UpdatedLabel string
+	Tags         []string
 }
 
 // versionRow is one version table row.
