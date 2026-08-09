@@ -138,6 +138,7 @@ var headerTpl = template.Must(template.New("header").Parse(`
     <a href="/dashboard" {{if eq .Active "dashboard"}}class="active"{{end}}>My drafts</a>
     <a href="/cli/auth" {{if eq .Active "cli"}}class="active"{{end}}>CLI setup</a>
     <a href="/dashboard/settings" {{if eq .Active "settings"}}class="active"{{end}}>Settings</a>
+    <a href="/dashboard/control" {{if eq .Active "control"}}class="active"{{end}}>Control</a>
   </nav>
   <form method="post" action="/auth/sign-out">
     <span class="muted small">{{.AccountName}}</span>
@@ -322,6 +323,52 @@ var draftDetailTpl = template.Must(template.New("detail").Parse(`
     <div class="muted small">Tip: include a CSS selector or line reference to anchor the comment.</div>
     <button class="button" type="submit">Post comment</button>
   </form>
+</main>`))
+
+var controlTpl = template.Must(template.New("control").Parse(`
+<main>
+  <h1>Control panel</h1>
+
+  <h2>Storage</h2>
+  <div class="meter">
+    <div class="meter-fill {{.MeterClass}}" style="width: {{.UsedPercent}}%"></div>
+  </div>
+  <p class="muted small">{{.UsedLabel}} of {{.BudgetLabel}} · {{.DraftCount}} drafts · {{.VersionCount}} versions</p>
+
+  <h2>Teams</h2>
+  <table>
+    <tr><th>Team</th><th>Drafts</th><th>Stored</th><th></th></tr>
+    {{if .Teams}}
+      {{range .Teams}}
+      <tr>
+        <td><a href="/dashboard/teams/{{.TeamID}}">{{.TeamName}}</a></td>
+        <td class="muted">{{.DraftCount}}</td>
+        <td class="muted">{{.StoredLabel}}</td>
+        <td style="width:30%"><div class="meter" style="margin:0"><div class="meter-fill" style="width: {{.Percent}}%"></div></div></td>
+      </tr>
+      {{end}}
+    {{else}}
+      <tr><td colspan="4" class="muted">No teams yet.</td></tr>
+    {{end}}
+  </table>
+
+  <h2>Audit log</h2>
+  {{if .Entries}}
+  <table>
+    <tr><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Details</th></tr>
+    {{range .Entries}}
+    <tr>
+      <td class="muted">{{.TimeLabel}}</td>
+      <td>{{.Actor}}</td>
+      <td><code>{{.Action}}</code></td>
+      <td class="muted mono">{{.Target}}</td>
+      <td class="muted">{{.Details}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted">Nothing audited yet — status changes, approvals, role changes, invites, webhooks and reviewer assignments land here.</p>
+  {{end}}
 </main>`))
 
 var dashboardDiffTpl = template.Must(template.New("diff").Parse(`

@@ -308,6 +308,7 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 	if req.Status == "approved" && draft.TeamID != "" {
 		if team, err := s.db.FindTeam(draft.TeamID); err == nil && team.RequiredApprovals > 0 {
 			_ = s.db.AddDraftApproval(draft.ID, key.AccountID)
+			s.recordAudit(draft.AccountID, draft.TeamID, key.AccountName, "approve", draft.ID, "approved draft")
 			var count int64
 			if hasReviewers, _ := s.db.DraftHasReviewers(draft.ID); hasReviewers {
 				count, _ = s.db.ReviewerApprovalCount(draft.ID)
@@ -340,6 +341,7 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		ToStatus:   req.Status,
 	})
 	s.recordActivity("status", key.AccountName, "moved "+from+" → "+req.Status, draft)
+	s.recordAudit(draft.AccountID, draft.TeamID, key.AccountName, "status", draft.ID, from+" → "+req.Status)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": true, "draft": s.decorateDraft(draft)})
 }
 

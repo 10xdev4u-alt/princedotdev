@@ -9,6 +9,18 @@ import (
 )
 
 // recordActivity appends a feed entry scoped to a draft's owner + team.
+// recordAudit appends an immutable audit entry (control-panel trail).
+func (s *Server) recordAudit(accountID, teamID, actor, action, target, details string) {
+	_ = s.db.RecordAudit(db.AuditEntry{
+		AccountID: accountID,
+		TeamID:    teamID,
+		Actor:     actor,
+		Action:    action,
+		Target:    target,
+		Details:   details,
+	})
+}
+
 func (s *Server) recordActivity(kind, actor, body string, draft *db.Draft) {
 	if draft == nil {
 		return

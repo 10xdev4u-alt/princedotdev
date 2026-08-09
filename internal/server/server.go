@@ -97,6 +97,8 @@ func (s *Server) routes() {
 
 	// Control panel
 	m.Handle("GET /api/stats", s.requireAuth(s.handleStats))
+	m.Handle("GET /api/audit", s.requireAuth(s.handleAudit))
+	m.Handle("GET /api/stats/teams", s.requireAuth(s.handleTeamStorage))
 	m.Handle("POST /api/api-keys", s.requireAuth(s.handleMintKey))
 	m.Handle("DELETE /api/api-keys/{keyId}", s.requireAuth(s.handleRevokeKey))
 

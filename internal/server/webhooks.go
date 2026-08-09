@@ -396,6 +396,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
+	s.recordAudit("", req.TeamID, key.AccountName, "webhook_added", name, "kind="+req.Kind+" events="+events)
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "webhook": wh})
 }
 
@@ -430,6 +431,7 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
+	s.recordAudit("", wh.TeamID, key.AccountName, "webhook_removed", wh.Name, wh.Kind)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
