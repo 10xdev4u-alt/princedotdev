@@ -39,6 +39,7 @@ func (s *Server) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
+	s.recordAudit("", teamID, key.AccountName, "invite_sent", email, "magic-link invite")
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ok":        true,
 		"invite":    inv,

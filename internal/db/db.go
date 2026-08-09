@@ -141,6 +141,18 @@ CREATE TABLE IF NOT EXISTS invites (
   expires_at TEXT NOT NULL,
   used_at TEXT
 );
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  account_id TEXT REFERENCES accounts(id),
+  team_id TEXT REFERENCES teams(id),
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target TEXT,
+  details TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_team ON audit_log(team_id);
+CREATE INDEX IF NOT EXISTS idx_audit_account ON audit_log(account_id);
 CREATE TABLE IF NOT EXISTS webhooks (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
@@ -1067,6 +1079,98 @@ type Activity struct {
 	Actor     string `json:"actor"`
 	Body      string `json:"body"`
 	CreatedAt string `json:"createdAt"`
+}
+
+// AuditEntry is one row of the immutable audit log.
+type AuditEntry struct {
+	ID        string `json:"id"`
+	AccountID string `json:"accountId"`
+	TeamID    string `json:"teamId"`
+	Actor     string `json:"actor"`
+	Action    string `json:"action"`
+	Target    string `json:"target"`
+	Details   string `json:"details"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// TeamStorage is a team's usage snapshot for the control panel.
+type TeamStorage struct {
+	TeamID      string `json:"teamId"`
+	TeamName    string `json:"teamName"`
+	StoredBytes int64  `json:"storedBytes"`
+	DraftCount  int64  `json:"draftCount"`
+}
+
+// RecordAudit appends an immutable audit entry.
+func (d *DB) RecordAudit(e AuditEntry) error {
+	e.ID = newID("aud")
+	_, err := d.sql.Exec(`
+		INSERT INTO audit_log (id, account_id, team_id, actor, action, target, details)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, nullIfEmpty(e.AccountID), nullIfEmpty(e.TeamID),
+		e.Actor, e.Action, nullIfEmpty(e.Target), nullIfEmpty(e.Details))
+	return err
+}
+
+// ListAudit returns audit entries scoped to a team (or the account's own
+// actions when teamID is empty), newest first.
+func (d *DB) ListAudit(teamID, accountID string, limit int) ([]AuditEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows *sql.Rows
+	var err error
+	if teamID != "" {
+		rows, err = d.sql.Query(`
+			SELECT id, COALESCE(account_id,''), COALESCE(team_id,''), actor, action,
+			       COALESCE(target,''), COALESCE(details,''), created_at
+			FROM audit_log WHERE team_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+			teamID, limit)
+	} else {
+		rows, err = d.sql.Query(`
+			SELECT id, COALESCE(account_id,''), COALESCE(team_id,''), actor, action,
+			       COALESCE(target,''), COALESCE(details,''), created_at
+			FROM audit_log WHERE account_id = ? OR team_id IS NULL
+			ORDER BY created_at DESC, id DESC LIMIT ?`,
+			accountID, limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		if err := rows.Scan(&e.ID, &e.AccountID, &e.TeamID, &e.Actor, &e.Action,
+			&e.Target, &e.Details, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// TeamStorageUsage returns per-team stored bytes and draft counts.
+func (d *DB) TeamStorageUsage() ([]TeamStorage, error) {
+	rows, err := d.sql.Query(`
+		SELECT t.id, t.name, COALESCE(SUM(v.file_size),0), COUNT(DISTINCT dr.id)
+		FROM teams t
+		LEFT JOIN drafts dr ON dr.team_id = t.id AND dr.deleted_at IS NULL
+		LEFT JOIN draft_versions v ON v.draft_id = dr.id
+		GROUP BY t.id ORDER BY 3 DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TeamStorage
+	for rows.Next() {
+		var ts TeamStorage
+		if err := rows.Scan(&ts.TeamID, &ts.TeamName, &ts.StoredBytes, &ts.DraftCount); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
 }
 
 // AddActivity appends a feed entry.

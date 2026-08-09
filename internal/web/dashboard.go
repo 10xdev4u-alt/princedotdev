@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"html/template"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,7 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/delete", h.handleSettingsDeleteWebhook)
 	mux.HandleFunc("GET /invite/{token}", h.handleInvitePage)
 	mux.HandleFunc("POST /invite/{token}", h.handleInviteAccept)
+	mux.HandleFunc("GET /dashboard/control", h.handleControlPage)
 	mux.HandleFunc("GET /dashboard/teams/{teamId}", h.handleTeamPage)
 	mux.HandleFunc("POST /dashboard/teams/{teamId}/settings", h.handleTeamSettings)
 	mux.HandleFunc("POST /dashboard/teams/{teamId}/members/{accountId}/role", h.handleTeamSetRole)
@@ -515,6 +517,121 @@ func (h *DashboardHandler) handleDraftDiffPage(w http.ResponseWriter, r *http.Re
 
 func hunkHeader(oldStart, oldCount, newStart, newCount int) string {
 	return "@@ -" + itoa(int64(oldStart)) + "," + itoa(int64(oldCount)) + " +" + itoa(int64(newStart)) + "," + itoa(int64(newCount)) + " @@"
+}
+
+// controlTeamRow is one team's storage line on the control page.
+type controlTeamRow struct {
+	TeamID      string
+	TeamName    string
+	DraftCount  int64
+	StoredLabel string
+	Percent     int
+}
+
+// auditRow is one audit-log line on the control page.
+type auditRow struct {
+	TimeLabel string
+	Actor     string
+	Action    string
+	Target    string
+	Details   string
+}
+
+func (h *DashboardHandler) handleControlPage(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	stats, err := h.db.Stats()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load stats.")
+		return
+	}
+	teams, err := h.db.ListTeamsForAccount(session.AccountID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load teams.")
+		return
+	}
+	allUsage, err := h.db.TeamStorageUsage()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load team storage.")
+		return
+	}
+	tRows := make([]controlTeamRow, 0, len(allUsage))
+	for _, ts := range allUsage {
+		if ok, _ := h.db.IsTeamAdmin(ts.TeamID, session.AccountID); !ok {
+			continue
+		}
+		pct := 0
+		if h.budget > 0 {
+			pct = int(float64(ts.StoredBytes) / float64(h.budget) * 100)
+			if pct > 100 {
+				pct = 100
+			}
+		}
+		tRows = append(tRows, controlTeamRow{
+			TeamID:      ts.TeamID,
+			TeamName:    ts.TeamName,
+			DraftCount:  ts.DraftCount,
+			StoredLabel: formatBytes(ts.StoredBytes),
+			Percent:     pct,
+		})
+	}
+	// Audit trail: the caller's own actions plus every team they admin.
+	entries := []db.AuditEntry{}
+	if own, err := h.db.ListAudit("", session.AccountID, 50); err == nil {
+		entries = append(entries, own...)
+	}
+	for _, t := range teams {
+		if ok, _ := h.db.IsTeamAdmin(t.ID, session.AccountID); ok {
+			if teamEntries, err := h.db.ListAudit(t.ID, "", 100); err == nil {
+				entries = append(entries, teamEntries...)
+			}
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].CreatedAt > entries[j].CreatedAt })
+	if len(entries) > 100 {
+		entries = entries[:100]
+	}
+	aRows := make([]auditRow, 0, len(entries))
+	for _, e := range entries {
+		aRows = append(aRows, auditRow{
+			TimeLabel: formatDate(e.CreatedAt),
+			Actor:     e.Actor,
+			Action:    e.Action,
+			Target:    e.Target,
+			Details:   e.Details,
+		})
+	}
+	usedPercent := float64(0)
+	meterClass := ""
+	if h.budget > 0 {
+		usedPercent = float64(stats.StoredBytes) / float64(h.budget) * 100
+		switch {
+		case usedPercent >= 90:
+			meterClass = "bad"
+		case usedPercent >= 70:
+			meterClass = "warn"
+		}
+		if usedPercent > 100 {
+			usedPercent = 100
+		}
+	}
+	body := template.HTML(execOrEmpty(controlTpl, map[string]any{
+		"UsedPercent":  int(usedPercent),
+		"MeterClass":   meterClass,
+		"UsedLabel":    formatBytes(stats.StoredBytes),
+		"BudgetLabel":  formatBytes(h.budget),
+		"DraftCount":   stats.DraftCount,
+		"VersionCount": stats.VersionCount,
+		"Teams":        tRows,
+		"Entries":      aRows,
+	}))
+	h.writePage(w, http.StatusOK, Page{
+		Title:  "Control — draftdeck",
+		Header: h.header(session, "control"),
+		Body:   body,
+	})
 }
 
 func (h *DashboardHandler) handlePostComment(w http.ResponseWriter, r *http.Request) {

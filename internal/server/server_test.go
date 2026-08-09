@@ -466,10 +466,19 @@ func TestWebhookDelivery(t *testing.T) {
 		t.Fatalf("status field missing: %v", embeds[0])
 	}
 
-	// delivery result recorded on the webhook row
-	whRow, err := d.FindWebhook(whID)
-	if err != nil || whRow == nil || whRow.LastStatus != 200 {
-		t.Fatalf("last status %+v err %v", whRow, err)
+	// delivery result recorded on the webhook row (async — poll briefly)
+	var whRow *db.Webhook
+	var werr error
+	deadline2 := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline2) {
+		whRow, werr = d.FindWebhook(whID)
+		if werr == nil && whRow != nil && whRow.LastStatus == 200 {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if werr != nil || whRow == nil || whRow.LastStatus != 200 {
+		t.Fatalf("last status %+v err %v", whRow, werr)
 	}
 
 	// list + delete
@@ -872,5 +881,60 @@ func TestReviewerAssignmentGate(t *testing.T) {
 	rec, _ = doJSON(t, h, "PUT", "/api/drafts/"+draftID+"/reviewers", map[string]any{"accountIds": []string{benID}}, benTok)
 	if rec.Code != 403 {
 		t.Fatalf("member assign status %d, want 403", rec.Code)
+	}
+}
+
+func TestAuditLogAndTeamStorage(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	ownerID, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, ownerTok, _ := d.CreateAPIKey(ownerID, "cli")
+	benID, _ := d.CreateAccount("Ben", "ben@team.dev")
+	_, benTok, _ := d.CreateAPIKey(benID, "cli")
+	h := s.Handler()
+
+	team, _ := d.CreateTeam("Core", ownerID)
+	_ = d.AddTeamMember(team.ID, benID, "member")
+
+	// activity that should be audited: upload, status, role change, reviewer assign
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "a.html", "teamId": team.ID}, ownerTok)
+	draftID := up["draftId"].(string)
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "in_review"}, ownerTok)
+
+	// non-admin member cannot read the team audit log (before Ben is promoted)
+	rec, _ := doJSON(t, h, "GET", "/api/audit?teamId="+team.ID, nil, benTok)
+	if rec.Code != 403 {
+		t.Fatalf("member audit status %d, want 403", rec.Code)
+	}
+
+	doJSON(t, h, "PUT", "/api/teams/"+team.ID+"/members/"+benID, map[string]any{"role": "admin"}, ownerTok)
+	doJSON(t, h, "PUT", "/api/drafts/"+draftID+"/reviewers", map[string]any{"accountIds": []string{benID}}, ownerTok)
+
+	// team audit log (owner) contains status + role + reviewers entries
+	rec, body := doJSON(t, h, "GET", "/api/audit?teamId="+team.ID, nil, ownerTok)
+	if rec.Code != 200 {
+		t.Fatalf("audit %d", rec.Code)
+	}
+	entries := body["entries"].([]any)
+	actions := map[string]bool{}
+	for _, e := range entries {
+		actions[e.(map[string]any)["action"].(string)] = true
+	}
+	for _, want := range []string{"status", "role", "reviewers"} {
+		if !actions[want] {
+			t.Fatalf("audit missing %q: %v", want, actions)
+		}
+	}
+
+	// team storage shows the uploaded bytes
+	rec, body = doJSON(t, h, "GET", "/api/stats/teams", nil, ownerTok)
+	if rec.Code != 200 {
+		t.Fatalf("team storage %d", rec.Code)
+	}
+	teams := body["teams"].([]any)
+	if len(teams) != 1 {
+		t.Fatalf("teams %v", teams)
+	}
+	if teams[0].(map[string]any)["storedBytes"].(float64) != float64(len(testHTML)) {
+		t.Fatalf("storedBytes %v, want %d", teams[0].(map[string]any)["storedBytes"], len(testHTML))
 	}
 }

@@ -113,5 +113,6 @@ func (s *Server) handleSetReviewers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.recordActivity("reviewers", key.AccountName, "assigned reviewers: "+strings.Join(names, ", "), draft)
+	s.recordAudit(draft.AccountID, draft.TeamID, key.AccountName, "reviewers", draft.ID, strings.Join(names, ", "))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reviewers": ids})
 }
