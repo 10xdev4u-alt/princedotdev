@@ -160,7 +160,7 @@ var dashboardTpl = template.Must(template.New("dashboard").Parse(`
   <h2>Teams</h2>
   <ul class="teams">
     {{if .Teams}}
-      {{range .Teams}}<li><a href="/api/teams/{{.ID}}">{{.Name}}</a></li>{{end}}
+      {{range .Teams}}<li><a href="/dashboard/teams/{{.ID}}">{{.Name}}</a></li>{{end}}
     {{else}}
       <li class="muted">No teams yet.</li>
     {{end}}

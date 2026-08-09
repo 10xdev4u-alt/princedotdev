@@ -200,6 +200,26 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := draft.Status
+
+	// Approval gate: approving a team draft records the approver; the draft
+	// only flips to approved once the team's required count is reached.
+	if req.Status == "approved" && draft.TeamID != "" {
+		if team, err := s.db.FindTeam(draft.TeamID); err == nil && team.RequiredApprovals > 0 {
+			_ = s.db.AddDraftApproval(draft.ID, key.AccountID)
+			count, _ := s.db.ApprovalCount(draft.ID)
+			if count < team.RequiredApprovals {
+				_ = s.db.SetStatus(draft.ID, "in_review")
+				draft.Status = "in_review"
+				writeJSON(w, http.StatusOK, map[string]any{
+					"ok":       true,
+					"approved": false,
+					"draft":    s.decorateDraft(draft),
+				})
+				return
+			}
+		}
+	}
+
 	if err := s.db.SetStatus(draft.ID, req.Status); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
@@ -213,7 +233,7 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		ToStatus:   req.Status,
 	})
 	s.recordActivity("status", key.AccountName, "moved "+from+" → "+req.Status, draft)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "draft": s.decorateDraft(draft)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "approved": true, "draft": s.decorateDraft(draft)})
 }
 
 func (s *Server) handleDeleteDraft(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +285,7 @@ func (s *Server) decorateDraft(d *db.Draft) map[string]any {
 		n := current.VersionNumber
 		latest = &n
 	}
-	return map[string]any{
+	out := map[string]any{
 		"draftId":             d.ID,
 		"title":               d.Title,
 		"description":         d.Description,
@@ -280,6 +300,13 @@ func (s *Server) decorateDraft(d *db.Draft) map[string]any {
 		"publicUrl":           s.cfg.PublicBaseURL + "/d/" + d.ID,
 		"rawUrl":              s.cfg.PublicBaseURL + "/d/" + d.ID + "/raw",
 	}
+	if d.TeamID != "" {
+		if team, err := s.db.FindTeam(d.TeamID); err == nil {
+			count, _ := s.db.ApprovalCount(d.ID)
+			out["approvals"] = map[string]any{"count": count, "required": team.RequiredApprovals}
+		}
+	}
+	return out
 }
 
 func decorateVersions(versions []db.Version) []map[string]any {

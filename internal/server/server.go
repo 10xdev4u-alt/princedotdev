@@ -75,9 +75,11 @@ func (s *Server) routes() {
 	m.Handle("GET /api/teams", s.requireAuth(s.handleListTeams))
 	m.Handle("POST /api/teams", s.requireAuth(s.handleCreateTeam))
 	m.Handle("GET /api/teams/{teamId}", s.requireAuth(s.handleTeamDetail))
+	m.Handle("PUT /api/teams/{teamId}", s.requireAuth(s.handleUpdateTeam))
 	m.Handle("GET /api/teams/{teamId}/members", s.requireAuth(s.handleListTeamMembers))
 	m.Handle("POST /api/teams/{teamId}/members", s.requireAuth(s.handleAddTeamMember))
 	m.Handle("DELETE /api/teams/{teamId}/members/{accountId}", s.requireAuth(s.handleRemoveTeamMember))
+	m.Handle("PUT /api/teams/{teamId}/members/{accountId}", s.requireAuth(s.handleSetMemberRole))
 	m.Handle("POST /api/teams/{teamId}/invites", s.requireAuth(s.handleCreateInvite))
 
 	// Invites (the magic-link token is the credential — no auth required)
