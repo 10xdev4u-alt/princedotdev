@@ -451,14 +451,14 @@ func TestWebhookDelivery(t *testing.T) {
 	if !ok || len(embeds) == 0 {
 		t.Fatalf("discord embed missing: %v", statusPayload)
 	}
-	footer := embeds[0].(map[string]any)["footer"].(map[string]any)["text"].(string)
-	if !strings.Contains(footer, "Maya") {
-		t.Fatalf("actor %v", footer)
+	author := embeds[0].(map[string]any)["author"].(map[string]any)["name"].(string)
+	if !strings.Contains(author, "Maya") {
+		t.Fatalf("actor %v", author)
 	}
 	fields := embeds[0].(map[string]any)["fields"].([]any)
 	statusFound := false
 	for _, f := range fields {
-		if f.(map[string]any)["name"] == "Status" && f.(map[string]any)["value"] == "in_review" {
+		if f.(map[string]any)["name"] == "Status" && f.(map[string]any)["value"] == "In review" {
 			statusFound = true
 		}
 	}
