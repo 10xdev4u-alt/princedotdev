@@ -1,9 +1,9 @@
 # draftdeck — npx client
 
 ```bash
-npx draftdeck upload ./plan.html
-npx draftdeck comments <draft-id>
-npx draftdeck status <draft-id> approved
+npx @princetheprogrammerbtw/draftdeck upload ./plan.html
+npx @princetheprogrammerbtw/draftdeck comments <draft-id>
+npx @princetheprogrammerbtw/draftdeck status <draft-id> approved
 ```
 
 This package is a tiny bootstrap: on first run it downloads the real client —

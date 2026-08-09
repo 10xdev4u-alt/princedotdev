@@ -51,23 +51,23 @@ Environment:
 
 ```bash
 # 1. An agent writes a plan as standalone HTML, then publishes it:
-npx draftdeck upload ./plan.html --description "Q3 plan"
+npx @princetheprogrammerbtw/draftdeck upload ./plan.html --description "Q3 plan"
 #    Uploaded draft
 #    URL: http://localhost:8080/d/abc123def456
 #    Raw HTML: http://localhost:8080/d/abc123def456/raw
 
 # 2. A teammate reviews it — comments, approve, or request changes:
-npx draftdeck comments abc123def456 --post "Add a migration section" --selector "h1"
-npx draftdeck status abc123def456 approved
+npx @princetheprogrammerbtw/draftdeck comments abc123def456 --post "Add a migration section" --selector "h1"
+npx @princetheprogrammerbtw/draftdeck status abc123def456 approved
 
 # 3. The agent pulls the feedback back as JSON, edits, re-uploads (→ v2):
 curl http://localhost:8080/api/drafts/abc123def456/comments
-npx draftdeck upload ./plan.html
+npx @princetheprogrammerbtw/draftdeck upload ./plan.html
 ```
 
 ## CLI
 
-The npx client (`npx draftdeck …`) downloads the native binary from GitHub
+The npx client (`npx @princetheprogrammerbtw/draftdeck …`) downloads the native binary from GitHub
 Releases on first run and caches it — no install step. `draftdeck` commands:
 
 | Command | Purpose |

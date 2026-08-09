@@ -1,7 +1,7 @@
 {
-  "name": "draftdeck",
-  "version": "0.1.0",
-  "description": "Publish static HTML drafts and manage team review — zero-dependency npx client.",
+  "name": "@princetheprogrammerbtw/draftdeck",
+  "version": "0.1.1",
+  "description": "Publish static HTML drafts and manage team review \u2014 zero-dependency npx client.",
   "license": "MIT",
   "bin": {
     "draftdeck": "bin/draftdeck.js"
