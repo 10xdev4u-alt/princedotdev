@@ -800,3 +800,77 @@ func TestDraftDiffAPI(t *testing.T) {
 		t.Fatalf("unauthenticated diff status %d", rec.Code)
 	}
 }
+
+func TestReviewerAssignmentGate(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	ownerID, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, ownerTok, _ := d.CreateAPIKey(ownerID, "cli")
+	benID, _ := d.CreateAccount("Ben", "ben@team.dev")
+	_, benTok, _ := d.CreateAPIKey(benID, "cli")
+	carolID, _ := d.CreateAccount("Carol", "carol@team.dev")
+	_, carolTok, _ := d.CreateAPIKey(carolID, "cli")
+	h := s.Handler()
+
+	team, _ := d.CreateTeam("Core", ownerID)
+	teamID := team.ID
+	_ = d.AddTeamMember(teamID, benID, "member")
+	_ = d.AddTeamMember(teamID, carolID, "member")
+	_ = d.UpdateTeamApprovals(teamID, 2)
+
+	// upload a team draft
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "r.html", "teamId": teamID}, ownerTok)
+	draftID := up["draftId"].(string)
+
+	// assign Ben + Carol as reviewers
+	rec, body := doJSON(t, h, "PUT", "/api/drafts/"+draftID+"/reviewers", map[string]any{"accountIds": []string{benID, carolID}}, ownerTok)
+	if rec.Code != 200 {
+		t.Fatalf("assign %d: %v", rec.Code, body)
+	}
+
+	// a non-reviewer (Ben is a reviewer; use a third member check) — actually
+	// make Maya (owner, not reviewer) approve: shouldn't count toward the gate.
+	rec, body = doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, ownerTok)
+	if rec.Code != 200 || body["approved"] != false {
+		t.Fatalf("owner approval should not clear gate: %d %v", rec.Code, body)
+	}
+
+	// Ben approves -> still 1/2
+	rec, body = doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, benTok)
+	if rec.Code != 200 || body["approved"] != false {
+		t.Fatalf("1/2 should hold: %d %v", rec.Code, body)
+	}
+
+	// Carol approves -> 2/2 -> approved
+	rec, body = doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "approved"}, carolTok)
+	if rec.Code != 200 || body["approved"] != true {
+		t.Fatalf("2/2 should approve: %d %v", rec.Code, body)
+	}
+
+	// detail exposes reviewers with approval state
+	rec, body = doJSON(t, h, "GET", "/api/drafts/"+draftID, nil, ownerTok)
+	revs := body["draft"].(map[string]any)["reviewers"].([]any)
+	if len(revs) != 2 {
+		t.Fatalf("reviewers %v", revs)
+	}
+	approved := 0
+	for _, rv := range revs {
+		if rv.(map[string]any)["approved"] == true {
+			approved++
+		}
+	}
+	if approved != 2 {
+		t.Fatalf("approved reviewers %d, want 2", approved)
+	}
+
+	// non-member cannot be assigned
+	_, body = doJSON(t, h, "PUT", "/api/drafts/"+draftID+"/reviewers", map[string]any{"accountIds": []string{"acct_outsider"}}, ownerTok)
+	if rec := body["ok"]; rec == true {
+		t.Fatalf("outsider accepted: %v", body)
+	}
+
+	// plain member cannot assign reviewers
+	rec, _ = doJSON(t, h, "PUT", "/api/drafts/"+draftID+"/reviewers", map[string]any{"accountIds": []string{benID}}, benTok)
+	if rec.Code != 403 {
+		t.Fatalf("member assign status %d, want 403", rec.Code)
+	}
+}

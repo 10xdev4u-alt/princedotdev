@@ -72,6 +72,8 @@ func (s *Server) routes() {
 	m.Handle("POST /api/drafts/{draftId}/comments", s.requireAuth(s.handleAddComment))
 	m.Handle("POST /api/drafts/{draftId}/status", s.requireAuth(s.handleSetStatus))
 	m.Handle("GET /api/drafts/{draftId}/diff", s.requireAuth(s.handleDraftDiff))
+	m.Handle("GET /api/drafts/{draftId}/reviewers", s.requireAuth(s.handleGetReviewers))
+	m.Handle("PUT /api/drafts/{draftId}/reviewers", s.requireAuth(s.handleSetReviewers))
 	m.Handle("DELETE /api/drafts/{draftId}", s.requireAuth(s.handleDeleteDraft))
 
 	// Teams
