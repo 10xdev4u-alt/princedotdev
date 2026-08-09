@@ -150,7 +150,16 @@ func (s *Server) handleAddComment(w http.ResponseWriter, r *http.Request) {
 	// A new comment on a non-approved draft returns it to review.
 	if draft.Status != "approved" {
 		_ = s.db.SetStatus(draft.ID, "in_review")
+		draft.Status = "in_review"
 	}
+
+	s.fireWebhooks(webhookEvent{
+		Event:         evComment,
+		Actor:         key.AccountName,
+		Draft:         draft,
+		VersionNumber: versionNumber,
+		Comment:       &comment,
+	})
 
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "comment": decorateComment(comment)})
 }
@@ -188,11 +197,19 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "Invalid status \"" + req.Status + "\"."})
 		return
 	}
+	from := draft.Status
 	if err := s.db.SetStatus(draft.ID, req.Status); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
 	draft.Status = req.Status
+	s.fireWebhooks(webhookEvent{
+		Event:      evStatus,
+		Actor:      key.AccountName,
+		Draft:      draft,
+		FromStatus: from,
+		ToStatus:   req.Status,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "draft": s.decorateDraft(draft)})
 }
 

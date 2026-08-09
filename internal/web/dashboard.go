@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"html/template"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +41,9 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/settings/keys/{keyId}/revoke", h.handleRevokeKey)
 	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/members/add", h.handleSettingsAddMember)
 	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/members/{accountId}/remove", h.handleSettingsRemoveMember)
+	mux.HandleFunc("POST /dashboard/settings/webhooks/add", h.handleSettingsAddWebhook)
+	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/test", h.handleSettingsTestWebhook)
+	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/delete", h.handleSettingsDeleteWebhook)
 }
 
 // ---- handlers ---------------------------------------------------------------
@@ -379,6 +384,47 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		}
 		kRows = append(kRows, keyRow{ID: k.ID, Name: k.Name, CreatedLabel: formatDate(k.CreatedAt), LastUsedLabel: last})
 	}
+	webhooks, err := h.db.ListWebhooks()
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load webhooks.")
+		return
+	}
+	type webhookRow struct {
+		ID          string
+		Name        string
+		Kind        string
+		EventsLabel string
+		LastLabel   string
+		TeamName    string
+	}
+	wRows := make([]webhookRow, 0, len(webhooks))
+	teamName := map[string]string{}
+	for _, t := range teams {
+		teamName[t.ID] = t.Name
+	}
+	for _, wh := range webhooks {
+		if !h.canManageWebhook(wh, session.AccountID) {
+			continue
+		}
+		events := strings.ReplaceAll(wh.Events, ",", ", ")
+		last := "never sent"
+		if wh.LastStatus >= 200 && wh.LastStatus < 300 {
+			last = strconv.FormatInt(wh.LastStatus, 10) + " OK"
+		} else if wh.LastStatus > 0 || wh.LastError != "" {
+			last = "failed"
+			if wh.LastError != "" {
+				last = truncateStr(wh.LastError, 60)
+			}
+		}
+		wRows = append(wRows, webhookRow{
+			ID:          wh.ID,
+			Name:        wh.Name,
+			Kind:        wh.Kind,
+			EventsLabel: events,
+			LastLabel:   last,
+			TeamName:    teamName[wh.TeamID],
+		})
+	}
 	usedPercent := float64(0)
 	meterClass := ""
 	if h.budget > 0 {
@@ -405,6 +451,7 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		"TeamCount":    stats.TeamCount,
 		"Keys":         kRows,
 		"Teams":        tRows,
+		"Webhooks":     wRows,
 	}))
 	h.writePage(w, http.StatusOK, Page{
 		Title:  "Settings — draftdeck",
@@ -454,6 +501,148 @@ func (h *DashboardHandler) handleSettingsAddMember(w http.ResponseWriter, r *htt
 		return
 	}
 	http.Redirect(w, r, "/dashboard/settings", http.StatusFound)
+}
+
+// ---- webhooks (settings) -----------------------------------------------------
+
+func (h *DashboardHandler) handleSettingsAddWebhook(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	kind := r.FormValue("kind")
+	url := strings.TrimSpace(r.FormValue("url"))
+	if kind == "" {
+		kind = "discord"
+	}
+	if name == "" || url == "" {
+		http.Redirect(w, r, "/dashboard/settings?error=webhook-missing", http.StatusFound)
+		return
+	}
+	if !validWebhookKind(kind) || !validWebhookURL(url) {
+		http.Redirect(w, r, "/dashboard/settings?error=webhook-invalid", http.StatusFound)
+		return
+	}
+	events := r.Form["events"]
+	if len(events) == 0 {
+		events = []string{"upload", "comment", "status"}
+	}
+	teamID := strings.TrimSpace(r.FormValue("teamId"))
+	if teamID != "" {
+		if ok, _ := h.db.IsTeamOwner(teamID, session.AccountID); !ok {
+			h.writeError(w, http.StatusForbidden, "Only team owners can create team webhooks.")
+			return
+		}
+	}
+	_, err := h.db.CreateWebhook(db.Webhook{
+		AccountID: session.AccountID,
+		TeamID:    teamID,
+		Name:      name,
+		Kind:      kind,
+		URL:       url,
+		Events:    strings.Join(events, ","),
+	})
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not create webhook.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/settings#webhooks", http.StatusFound)
+}
+
+func (h *DashboardHandler) handleSettingsTestWebhook(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	wh, err := h.db.FindWebhook(r.PathValue("webhookId"))
+	if err != nil || wh == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !h.canManageWebhook(*wh, session.AccountID) {
+		h.writeError(w, http.StatusForbidden, "You don't have access to this webhook.")
+		return
+	}
+	status, errMsg := postTestWebhook(wh.URL, wh.Kind)
+	_ = h.db.SetWebhookResult(wh.ID, status, errMsg)
+	if status >= 200 && status < 300 {
+		http.Redirect(w, r, "/dashboard/settings#webhooks", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, "/dashboard/settings?error=webhook-failed#webhooks", http.StatusFound)
+}
+
+func (h *DashboardHandler) handleSettingsDeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	wh, err := h.db.FindWebhook(r.PathValue("webhookId"))
+	if err != nil || wh == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !h.canManageWebhook(*wh, session.AccountID) {
+		h.writeError(w, http.StatusForbidden, "You don't have access to this webhook.")
+		return
+	}
+	if err := h.db.DeleteWebhook(wh.ID); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not delete webhook.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard/settings#webhooks", http.StatusFound)
+}
+
+func (h *DashboardHandler) canManageWebhook(wh db.Webhook, accountID string) bool {
+	if wh.AccountID == accountID {
+		return true
+	}
+	if wh.TeamID != "" {
+		if ok, _ := h.db.IsTeamOwner(wh.TeamID, accountID); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func validWebhookKind(kind string) bool {
+	return kind == "discord" || kind == "slack" || kind == "generic"
+}
+
+func validWebhookURL(raw string) bool {
+	if !strings.HasPrefix(raw, "http://") && !strings.HasPrefix(raw, "https://") {
+		return false
+	}
+	return strings.Contains(raw, "/")
+}
+
+// postTestWebhook sends a minimal channel-appropriate ping and returns the
+// HTTP status plus any error string.
+func postTestWebhook(url, kind string) (int, string) {
+	var payload []byte
+	switch kind {
+	case "slack":
+		payload = []byte(`{"text":"draftdeck webhook test — if you see this, the channel is wired 🎉"}`)
+	case "generic":
+		payload = []byte(`{"event":"test","message":"draftdeck webhook test"}`)
+	default:
+		payload = []byte(`{"content":"draftdeck webhook test — if you see this, the channel is wired 🎉"}`)
+	}
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ""
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 func (h *DashboardHandler) handleSettingsRemoveMember(w http.ResponseWriter, r *http.Request) {

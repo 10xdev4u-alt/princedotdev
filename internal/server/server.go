@@ -84,6 +84,12 @@ func (s *Server) routes() {
 	m.Handle("POST /api/api-keys", s.requireAuth(s.handleMintKey))
 	m.Handle("DELETE /api/api-keys/{keyId}", s.requireAuth(s.handleRevokeKey))
 
+	// Webhooks
+	m.Handle("GET /api/webhooks", s.requireAuth(s.handleListWebhooks))
+	m.Handle("POST /api/webhooks", s.requireAuth(s.handleCreateWebhook))
+	m.Handle("DELETE /api/webhooks/{webhookId}", s.requireAuth(s.handleDeleteWebhook))
+	m.Handle("POST /api/webhooks/{webhookId}/test", s.requireAuth(s.handleTestWebhook))
+
 	// Uploads (anonymous allowed; auth resolved before rate limiting so the
 	// limiter can key on the API key when present).
 	m.Handle("POST /api/uploads", s.optionalAuthMiddleware(s.httpRateLimit(s.handleUpload, func(r *http.Request) string {

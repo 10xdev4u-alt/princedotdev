@@ -201,6 +201,17 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := "Anonymous"
+	if key != nil {
+		actor = key.AccountName
+	}
+	s.fireWebhooks(webhookEvent{
+		Event:         evUpload,
+		Actor:         actor,
+		Draft:         draft,
+		VersionNumber: v.VersionNumber,
+	})
+
 	status := http.StatusCreated
 	if !created {
 		status = http.StatusOK

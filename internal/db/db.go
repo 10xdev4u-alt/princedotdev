@@ -99,6 +99,19 @@ CREATE TABLE IF NOT EXISTS comments (
   author TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS webhooks (
+  id TEXT PRIMARY KEY,
+  account_id TEXT NOT NULL REFERENCES accounts(id),
+  team_id TEXT REFERENCES teams(id),
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'discord',
+  url TEXT NOT NULL,
+  events TEXT NOT NULL DEFAULT 'comment,status,upload',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_status INTEGER,
+  last_error TEXT
+);
 CREATE INDEX IF NOT EXISTS idx_versions_draft ON draft_versions(draft_id);
 CREATE INDEX IF NOT EXISTS idx_comments_draft ON comments(draft_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_team ON drafts(team_id);
@@ -755,6 +768,101 @@ func (d *DB) ListComments(draftID string) ([]Comment, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// ---- webhooks ----------------------------------------------------------------------
+
+// Webhook is an outbound notification endpoint (Discord/Slack/generic).
+type Webhook struct {
+	ID         string `json:"id"`
+	AccountID  string `json:"accountId"`
+	TeamID     string `json:"teamId"`
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	URL        string `json:"url"`
+	Events     string `json:"events"` // comma-separated: upload,comment,status
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
+	LastStatus int64  `json:"lastStatus"`
+	LastError  string `json:"lastError"`
+}
+
+// CreateWebhook inserts a webhook and returns it.
+func (d *DB) CreateWebhook(w Webhook) (Webhook, error) {
+	w.ID = newID("whk")
+	if w.Kind == "" {
+		w.Kind = "discord"
+	}
+	_, err := d.sql.Exec(`
+		INSERT INTO webhooks (id, account_id, team_id, name, kind, url, events)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.AccountID, nullIfEmpty(w.TeamID), w.Name, w.Kind, w.URL, w.Events)
+	if err != nil {
+		return Webhook{}, err
+	}
+	found, err := d.FindWebhook(w.ID)
+	if err != nil {
+		return Webhook{}, err
+	}
+	if found == nil {
+		return Webhook{}, fmt.Errorf("webhook insert failed")
+	}
+	return *found, nil
+}
+
+// FindWebhook returns a webhook by id.
+func (d *DB) FindWebhook(id string) (*Webhook, error) {
+	row := d.sql.QueryRow(`
+		SELECT id, account_id, COALESCE(team_id,''), name, kind, url, events,
+		       created_at, updated_at, COALESCE(last_status,0), COALESCE(last_error,'')
+		FROM webhooks WHERE id = ?`, id)
+	var w Webhook
+	err := row.Scan(&w.ID, &w.AccountID, &w.TeamID, &w.Name, &w.Kind, &w.URL, &w.Events,
+		&w.CreatedAt, &w.UpdatedAt, &w.LastStatus, &w.LastError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &w, nil
+}
+
+// ListWebhooks lists every webhook (server is single-instance; callers filter
+// by ownership). Newest first.
+func (d *DB) ListWebhooks() ([]Webhook, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, account_id, COALESCE(team_id,''), name, kind, url, events,
+		       created_at, updated_at, COALESCE(last_status,0), COALESCE(last_error,'')
+		FROM webhooks ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Webhook
+	for rows.Next() {
+		var w Webhook
+		if err := rows.Scan(&w.ID, &w.AccountID, &w.TeamID, &w.Name, &w.Kind, &w.URL, &w.Events,
+			&w.CreatedAt, &w.UpdatedAt, &w.LastStatus, &w.LastError); err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// DeleteWebhook removes a webhook row.
+func (d *DB) DeleteWebhook(id string) error {
+	_, err := d.sql.Exec(`DELETE FROM webhooks WHERE id = ?`, id)
+	return err
+}
+
+// SetWebhookResult records the outcome of the most recent delivery attempt.
+func (d *DB) SetWebhookResult(id string, status int, errMsg string) error {
+	_, err := d.sql.Exec(`
+		UPDATE webhooks SET last_status = ?, last_error = ?, updated_at = datetime('now')
+		WHERE id = ?`, status, nullIfEmpty(errMsg), id)
+	return err
 }
 
 // ---- helpers ------------------------------------------------------------------------

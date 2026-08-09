@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/10xdev4u-alt/princedotdev/internal/config"
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
@@ -345,5 +347,141 @@ func TestBackupRestore(t *testing.T) {
 	_, drafts := doJSON(t, s2.Handler(), "GET", "/api/drafts", nil, token)
 	if len(drafts["drafts"].([]any)) != 1 {
 		t.Fatalf("restored drafts %v", drafts)
+	}
+}
+
+func TestWebhookDelivery(t *testing.T) {
+	var mu sync.Mutex
+	var received []map[string]any
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var p map[string]any
+		_ = json.Unmarshal(body, &p)
+		mu.Lock()
+		received = append(received, p)
+		mu.Unlock()
+		w.WriteHeader(200)
+	}))
+	defer receiver.Close()
+
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+
+	// status-only webhook
+	rec, wh := doJSON(t, h, "POST", "/api/webhooks", map[string]any{
+		"name": "status channel", "kind": "discord", "url": receiver.URL, "events": []string{"status"},
+	}, token)
+	if rec.Code != 201 {
+		t.Fatalf("create webhook %d %v", rec.Code, wh)
+	}
+	whID := wh["webhook"].(map[string]any)["id"].(string)
+
+	// all-events webhook
+	if rec, _ := doJSON(t, h, "POST", "/api/webhooks", map[string]any{
+		"name": "full channel", "kind": "discord", "url": receiver.URL,
+	}, token); rec.Code != 201 {
+		t.Fatalf("create full webhook %d", rec.Code)
+	}
+
+	// invalid inputs rejected
+	if rec, _ := doJSON(t, h, "POST", "/api/webhooks", map[string]any{
+		"name": "bad", "kind": "discord", "url": "ftp://nope",
+	}, token); rec.Code != 400 {
+		t.Fatalf("bad url %d", rec.Code)
+	}
+	if rec, _ := doJSON(t, h, "POST", "/api/webhooks", map[string]any{
+		"name": "bad", "kind": "pager", "url": receiver.URL,
+	}, token); rec.Code != 400 {
+		t.Fatalf("bad kind %d", rec.Code)
+	}
+
+	// upload (triggers only the full webhook), comment (full only),
+	// status (both).
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "p.html"}, token)
+	draftID := up["draftId"].(string)
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/comments",
+		map[string]any{"body": "make the heading bigger", "anchor": map[string]any{"selector": "h1"}}, token)
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "in_review"}, token)
+
+	// expect 4 deliveries: full×3 + status-only×1
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(received)
+		mu.Unlock()
+		if n >= 4 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(received) != 4 {
+		t.Fatalf("expected 4 deliveries, got %d: %v", len(received), received)
+	}
+
+	events := map[string]int{}
+	var statusPayload map[string]any
+	for _, p := range received {
+		ev, _ := p["event"].(string)
+		events[ev]++
+		if ev == "status" {
+			statusPayload = p
+		}
+		if ev == "comment" {
+			if _, ok := p["comment"].(map[string]any); ok {
+				continue
+			}
+			// discord embeds carry the body in the description
+			embeds := p["embeds"].([]any)
+			desc, _ := embeds[0].(map[string]any)["description"].(string)
+			if !strings.Contains(desc, "make the heading bigger") {
+				t.Fatalf("comment body missing: %v", p)
+			}
+		}
+	}
+	if events["upload"] != 1 || events["comment"] != 1 || events["status"] != 2 {
+		t.Fatalf("event counts %v", events)
+	}
+
+	// discord embed formatting on a status delivery
+	embeds, ok := statusPayload["embeds"].([]any)
+	if !ok || len(embeds) == 0 {
+		t.Fatalf("discord embed missing: %v", statusPayload)
+	}
+	footer := embeds[0].(map[string]any)["footer"].(map[string]any)["text"].(string)
+	if !strings.Contains(footer, "Maya") {
+		t.Fatalf("actor %v", footer)
+	}
+	fields := embeds[0].(map[string]any)["fields"].([]any)
+	statusFound := false
+	for _, f := range fields {
+		if f.(map[string]any)["name"] == "Status" && f.(map[string]any)["value"] == "in_review" {
+			statusFound = true
+		}
+	}
+	if !statusFound {
+		t.Fatalf("status field missing: %v", embeds[0])
+	}
+
+	// delivery result recorded on the webhook row
+	whRow, err := d.FindWebhook(whID)
+	if err != nil || whRow == nil || whRow.LastStatus != 200 {
+		t.Fatalf("last status %+v err %v", whRow, err)
+	}
+
+	// list + delete
+	_, listed := doJSON(t, h, "GET", "/api/webhooks", nil, token)
+	if n := len(listed["webhooks"].([]any)); n != 2 {
+		t.Fatalf("list webhooks %d", n)
+	}
+	if rec := doRaw(t, h, "DELETE", "/api/webhooks/"+whID, token); rec.Code != 200 {
+		t.Fatalf("delete webhook %d", rec.Code)
+	}
+	_, listed2 := doJSON(t, h, "GET", "/api/webhooks", nil, token)
+	if n := len(listed2["webhooks"].([]any)); n != 1 {
+		t.Fatalf("list after delete %d", n)
 	}
 }
