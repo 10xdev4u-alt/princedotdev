@@ -11,6 +11,7 @@ import (
 
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
 	"github.com/10xdev4u-alt/princedotdev/internal/diff"
+	"github.com/10xdev4u-alt/princedotdev/internal/digest"
 	"github.com/10xdev4u-alt/princedotdev/internal/store"
 )
 
@@ -51,6 +52,7 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/members/{accountId}/remove", h.handleSettingsRemoveMember)
 	mux.HandleFunc("POST /dashboard/settings/webhooks/add", h.handleSettingsAddWebhook)
 	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/test", h.handleSettingsTestWebhook)
+	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/send-digest", h.handleSettingsSendDigest)
 	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/delete", h.handleSettingsDeleteWebhook)
 	mux.HandleFunc("GET /invite/{token}", h.handleInvitePage)
 	mux.HandleFunc("POST /invite/{token}", h.handleInviteAccept)
@@ -928,6 +930,7 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		EventsLabel string
 		LastLabel   string
 		TeamName    string
+		TeamID      string
 		Deliveries  []webhookDeliveryRow
 	}
 	wRows := make([]webhookRow, 0, len(webhooks))
@@ -967,6 +970,7 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 			EventsLabel: events,
 			LastLabel:   last,
 			TeamName:    teamName[wh.TeamID],
+			TeamID:      wh.TeamID,
 			Deliveries:  dRows,
 		})
 	}
@@ -1116,6 +1120,73 @@ func (h *DashboardHandler) handleSettingsTestWebhook(w http.ResponseWriter, r *h
 		return
 	}
 	http.Redirect(w, r, "/dashboard/settings?error=webhook-failed#webhooks", http.StatusFound)
+}
+
+// postWebhook POSTs a JSON payload to a webhook URL (single attempt).
+func postWebhook(target string, payload []byte) (int, string) {
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Post(target, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return 0, err.Error()
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, ""
+}
+
+// wantsDigestEvent reports whether the webhook subscribes to digest pushes.
+func wantsDigestEvent(events string) bool {
+	for _, e := range strings.Split(events, ",") {
+		if strings.TrimSpace(e) == "digest" {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSettingsSendDigest pushes the team's daily review summary to every
+// digest-subscribed webhook for that team (fire-and-forget with history).
+func (h *DashboardHandler) handleSettingsSendDigest(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	wh, err := h.db.FindWebhook(r.PathValue("webhookId"))
+	if err != nil || wh == nil {
+		h.writeError(w, http.StatusNotFound, "Webhook not found.")
+		return
+	}
+	if !h.canManageWebhook(*wh, session.AccountID) {
+		h.writeError(w, http.StatusForbidden, "You don't have access to this webhook.")
+		return
+	}
+	if wh.TeamID == "" {
+		h.writeError(w, http.StatusBadRequest, "Digests need a team webhook.")
+		return
+	}
+	team, err := h.db.FindTeam(wh.TeamID)
+	if err != nil || team.ID == "" {
+		h.writeError(w, http.StatusNotFound, "Team not found.")
+		return
+	}
+	sum := digest.Build(h.db, team)
+	if sum == nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not build the digest.")
+		return
+	}
+	all, _ := h.db.ListWebhooks()
+	for _, hk := range all {
+		if hk.TeamID != team.ID || !wantsDigestEvent(hk.Events) {
+			continue
+		}
+		payload := digest.Payload(hk.Kind, sum)
+		go func(hk db.Webhook, payload []byte) {
+			status, errMsg := postWebhook(hk.URL, payload)
+			_ = h.db.SetWebhookResult(hk.ID, status, errMsg)
+			_ = h.db.RecordWebhookDelivery(hk.ID, "digest", status, errMsg)
+		}(hk, payload)
+	}
+	_ = h.db.SetTeamLastDigest(team.ID)
+	http.Redirect(w, r, "/dashboard/settings#webhooks", http.StatusFound)
 }
 
 func (h *DashboardHandler) handleSettingsDeleteWebhook(w http.ResponseWriter, r *http.Request) {

@@ -552,6 +552,11 @@ var settingsTpl = template.Must(template.New("settings").Parse(`
           <form method="post" action="/dashboard/settings/webhooks/{{.ID}}/delete" onsubmit="return confirm('Delete {{.Name}}?')">
             <button class="linklike bad" type="submit">Delete</button>
           </form>
+          {{if .TeamID}}
+          <form method="post" action="/dashboard/settings/webhooks/{{.ID}}/send-digest">
+            <button class="linklike" type="submit" title="Push the daily review summary now">Send digest</button>
+          </form>
+          {{end}}
         </div>
       </td>
     </tr>
@@ -592,6 +597,7 @@ var settingsTpl = template.Must(template.New("settings").Parse(`
     <label class="small"><input type="checkbox" name="events" value="upload" checked /> upload</label>
     <label class="small"><input type="checkbox" name="events" value="comment" checked /> comment</label>
     <label class="small"><input type="checkbox" name="events" value="status" checked /> status</label>
+    <label class="small"><input type="checkbox" name="events" value="digest" /> digest</label>
     {{if .Teams}}
     <select class="text inline" name="teamId" style="width:auto">
       <option value="">Personal</option>

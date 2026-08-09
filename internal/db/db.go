@@ -215,6 +215,9 @@ func Open(cfg config.Config) (*DB, error) {
 	if err := d.ensureColumn("teams", "required_approvals", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return nil, err
 	}
+	if err := d.ensureColumn("teams", "last_digest_at", "TEXT"); err != nil {
+		return nil, err
+	}
 	if err := d.ensureSentinel(); err != nil {
 		return nil, err
 	}
@@ -401,6 +404,37 @@ func (d *DB) FindTeam(id string) (Team, error) {
 	var t Team
 	err := row.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.RequiredApprovals)
 	return t, err
+}
+
+// ListTeams returns every team.
+func (d *DB) ListTeams() ([]Team, error) {
+	rows, err := d.sql.Query(`SELECT id, name, created_at, COALESCE(required_approvals,0) FROM teams ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Team
+	for rows.Next() {
+		var t Team
+		if err := rows.Scan(&t.ID, &t.Name, &t.CreatedAt, &t.RequiredApprovals); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// GetTeamLastDigest returns the team's last digest timestamp ("" if never).
+func (d *DB) GetTeamLastDigest(teamID string) (string, error) {
+	var v string
+	err := d.sql.QueryRow(`SELECT COALESCE(last_digest_at,'') FROM teams WHERE id = ?`, teamID).Scan(&v)
+	return v, err
+}
+
+// SetTeamLastDigest stamps the team as having received its digest now.
+func (d *DB) SetTeamLastDigest(teamID string) error {
+	_, err := d.sql.Exec(`UPDATE teams SET last_digest_at = datetime('now') WHERE id = ?`, teamID)
+	return err
 }
 
 // AddTeamMember adds (or keeps) a member on a team.
