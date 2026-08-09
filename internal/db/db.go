@@ -99,6 +99,18 @@ CREATE TABLE IF NOT EXISTS comments (
   author TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS activity (
+  id TEXT PRIMARY KEY,
+  account_id TEXT REFERENCES accounts(id),
+  team_id TEXT REFERENCES teams(id),
+  draft_id TEXT REFERENCES drafts(id),
+  kind TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_activity_account ON activity(account_id);
+CREATE INDEX IF NOT EXISTS idx_activity_team ON activity(team_id);
 CREATE TABLE IF NOT EXISTS invites (
   id TEXT PRIMARY KEY,
   team_id TEXT NOT NULL REFERENCES teams(id),
@@ -155,10 +167,41 @@ func Open(cfg config.Config) (*DB, error) {
 	if _, err := sqlDB.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	// Additive column migrations for pre-existing databases.
+	if err := d.ensureColumn("accounts", "feed_read_at", "TEXT"); err != nil {
+		return nil, err
+	}
 	if err := d.ensureSentinel(); err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// ensureColumn adds a column to an existing table when missing (SQLite lacks
+// ADD COLUMN IF NOT EXISTS). Used for additive migrations on old databases.
+func (d *DB) ensureColumn(table, column, decl string) error {
+	rows, err := d.sql.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull int
+		var dflt, pk any
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = d.sql.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + decl)
+	return err
 }
 
 func ensureDir(dir string) error {
@@ -778,6 +821,77 @@ func (d *DB) ListComments(draftID string) ([]Comment, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// ---- activity feed --------------------------------------------------------------------
+
+// Activity is one feed entry: an upload, comment, status change, mention, or
+// membership event. Rows are scoped to a personal account or a team.
+type Activity struct {
+	ID        string `json:"id"`
+	AccountID string `json:"accountId"`
+	TeamID    string `json:"teamId"`
+	DraftID   string `json:"draftId"`
+	Kind      string `json:"kind"`
+	Actor     string `json:"actor"`
+	Body      string `json:"body"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// AddActivity appends a feed entry.
+func (d *DB) AddActivity(a Activity) error {
+	a.ID = newID("act")
+	_, err := d.sql.Exec(`
+		INSERT INTO activity (id, account_id, team_id, draft_id, kind, actor, body)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, nullIfEmpty(a.AccountID), nullIfEmpty(a.TeamID), nullIfEmpty(a.DraftID),
+		a.Kind, a.Actor, a.Body)
+	return err
+}
+
+// ListActivity returns the account's feed: rows for its own drafts plus rows
+// for teams it belongs to. Newest first.
+func (d *DB) ListActivity(accountID string, limit int) ([]Activity, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.sql.Query(`
+		SELECT a.id, COALESCE(a.account_id,''), COALESCE(a.team_id,''), COALESCE(a.draft_id,''),
+		       a.kind, a.actor, a.body, a.created_at
+		FROM activity a
+		WHERE a.account_id = ?
+		   OR a.team_id IN (SELECT team_id FROM team_members WHERE account_id = ?)
+		ORDER BY a.created_at DESC, a.id DESC LIMIT ?`, accountID, accountID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Activity
+	for rows.Next() {
+		var a Activity
+		if err := rows.Scan(&a.ID, &a.AccountID, &a.TeamID, &a.DraftID, &a.Kind, &a.Actor, &a.Body, &a.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// UnreadActivity counts feed entries newer than the account's read marker.
+func (d *DB) UnreadActivity(accountID string) (int64, error) {
+	var n int64
+	err := d.sql.QueryRow(`
+		SELECT COUNT(*) FROM activity a
+		WHERE (a.account_id = ? OR a.team_id IN (SELECT team_id FROM team_members WHERE account_id = ?))
+		  AND a.created_at > COALESCE((SELECT feed_read_at FROM accounts WHERE id = ?), '')
+		`, accountID, accountID, accountID).Scan(&n)
+	return n, err
+}
+
+// MarkActivityRead sets the account's read marker to now.
+func (d *DB) MarkActivityRead(accountID string) error {
+	_, err := d.sql.Exec(`UPDATE accounts SET feed_read_at = datetime('now') WHERE id = ?`, accountID)
+	return err
 }
 
 // ---- invites -------------------------------------------------------------------------

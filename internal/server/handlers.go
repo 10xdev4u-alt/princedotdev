@@ -211,6 +211,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		Draft:         draft,
 		VersionNumber: v.VersionNumber,
 	})
+	s.recordActivity("upload", actor, "published v"+strconv.FormatInt(v.VersionNumber, 10), draft)
 
 	status := http.StatusCreated
 	if !created {

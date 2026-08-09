@@ -126,6 +126,7 @@ func (s *Server) handleAddTeamMember(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
+	s.recordTeamActivity("member_joined", account.Name, "joined the team", team.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"ok":     true,
 		"member": map[string]any{"accountId": account.ID, "name": account.Name, "email": account.Email},

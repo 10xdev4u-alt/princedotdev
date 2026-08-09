@@ -46,6 +46,7 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/delete", h.handleSettingsDeleteWebhook)
 	mux.HandleFunc("GET /invite/{token}", h.handleInvitePage)
 	mux.HandleFunc("POST /invite/{token}", h.handleInviteAccept)
+	mux.HandleFunc("POST /dashboard/activity/read", h.handleMarkActivityRead)
 	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/invites/add", h.handleSettingsCreateInvite)
 	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/invites/{inviteId}/revoke", h.handleSettingsRevokeInvite)
 }
@@ -86,9 +87,40 @@ func (h *DashboardHandler) handleDashboard(w http.ResponseWriter, r *http.Reques
 			UpdatedLabel: formatDate(it.UpdatedAt),
 		})
 	}
+	activity, err := h.db.ListActivity(session.AccountID, 20)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load activity.")
+		return
+	}
+	unread, err := h.db.UnreadActivity(session.AccountID)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not count activity.")
+		return
+	}
+	type actRow struct {
+		Kind      string
+		KindLabel string
+		Actor     string
+		Body      string
+		DraftID   string
+		TimeLabel string
+	}
+	aRows := make([]actRow, 0, len(activity))
+	for _, a := range activity {
+		aRows = append(aRows, actRow{
+			Kind:      a.Kind,
+			KindLabel: activityLabel(a.Kind),
+			Actor:     a.Actor,
+			Body:      a.Body,
+			DraftID:   a.DraftID,
+			TimeLabel: formatDate(a.CreatedAt),
+		})
+	}
 	body := template.HTML(execOrEmpty(dashboardTpl, map[string]any{
-		"Drafts": rows,
-		"Teams":  teams,
+		"Drafts":   rows,
+		"Teams":    teams,
+		"Activity": aRows,
+		"Unread":   unread,
 	}))
 	h.writePage(w, http.StatusOK, Page{
 		Title:  "My drafts — draftdeck",
@@ -329,6 +361,34 @@ func (h *DashboardHandler) handleMintKey(w http.ResponseWriter, r *http.Request)
 }
 
 // ---- settings (control panel) ------------------------------------------------
+
+func (h *DashboardHandler) handleMarkActivityRead(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	if err := h.db.MarkActivityRead(session.AccountID); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not mark activity read.")
+		return
+	}
+	http.Redirect(w, r, "/dashboard#activity", http.StatusFound)
+}
+
+func activityLabel(kind string) string {
+	switch kind {
+	case "upload":
+		return "Upload"
+	case "comment":
+		return "Comment"
+	case "status":
+		return "Status"
+	case "mention":
+		return "Mention"
+	case "member_joined":
+		return "Team"
+	}
+	return kind
+}
 
 func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 	session := h.requireSession(w, r)
