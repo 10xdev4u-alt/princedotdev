@@ -99,6 +99,16 @@ CREATE TABLE IF NOT EXISTS comments (
   author TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS invites (
+  id TEXT PRIMARY KEY,
+  team_id TEXT NOT NULL REFERENCES teams(id),
+  email TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
 CREATE TABLE IF NOT EXISTS webhooks (
   id TEXT PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id),
@@ -768,6 +778,105 @@ func (d *DB) ListComments(draftID string) ([]Comment, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// ---- invites -------------------------------------------------------------------------
+
+// Invite is a magic-link invitation to join a team.
+type Invite struct {
+	ID        string `json:"id"`
+	TeamID    string `json:"teamId"`
+	Email     string `json:"email"`
+	CreatedBy string `json:"createdBy"`
+	CreatedAt string `json:"createdAt"`
+	ExpiresAt string `json:"expiresAt"`
+	UsedAt    string `json:"usedAt"`
+}
+
+// CreateInvite stores a magic-link invite (7-day expiry) and returns the
+// plaintext token (shown exactly once in the invite link).
+func (d *DB) CreateInvite(teamID, email, createdBy string) (Invite, string, error) {
+	token := randomToken(24)
+	inv := Invite{
+		ID:        newID("inv"),
+		TeamID:    teamID,
+		Email:     lowercase(email),
+		CreatedBy: createdBy,
+	}
+	_, err := d.sql.Exec(`
+		INSERT INTO invites (id, team_id, email, token_hash, created_by, expires_at)
+		VALUES (?, ?, ?, ?, ?, datetime('now', '+7 days'))`,
+		inv.ID, inv.TeamID, inv.Email, hashToken(token), createdBy)
+	if err != nil {
+		return Invite{}, "", err
+	}
+	found, err := d.FindInvite(inv.ID)
+	if err != nil {
+		return Invite{}, "", err
+	}
+	return *found, token, nil
+}
+
+// FindInvite returns an invite row by id.
+func (d *DB) FindInvite(id string) (*Invite, error) {
+	row := d.sql.QueryRow(`
+		SELECT id, team_id, email, created_by, created_at, expires_at, COALESCE(used_at,'')
+		FROM invites WHERE id = ?`, id)
+	return scanInvite(row)
+}
+
+// FindInviteByToken resolves a magic-link token to its invite, or nil when
+// unknown, used, or expired.
+func (d *DB) FindInviteByToken(token string) (*Invite, error) {
+	row := d.sql.QueryRow(`
+		SELECT id, team_id, email, created_by, created_at, expires_at, COALESCE(used_at,'')
+		FROM invites WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')
+		LIMIT 1`, hashToken(token))
+	return scanInvite(row)
+}
+
+func scanInvite(row *sql.Row) (*Invite, error) {
+	var inv Invite
+	err := row.Scan(&inv.ID, &inv.TeamID, &inv.Email, &inv.CreatedBy, &inv.CreatedAt, &inv.ExpiresAt, &inv.UsedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &inv, nil
+}
+
+// ListInvites lists pending invites for a team (used ones included, flagged).
+func (d *DB) ListInvites(teamID string) ([]Invite, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, team_id, email, created_by, created_at, expires_at, COALESCE(used_at,'')
+		FROM invites WHERE team_id = ? ORDER BY created_at DESC`, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Invite
+	for rows.Next() {
+		var inv Invite
+		if err := rows.Scan(&inv.ID, &inv.TeamID, &inv.Email, &inv.CreatedBy, &inv.CreatedAt, &inv.ExpiresAt, &inv.UsedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, inv)
+	}
+	return out, rows.Err()
+}
+
+// UseInvite marks an invite as used.
+func (d *DB) UseInvite(id string) error {
+	_, err := d.sql.Exec(`UPDATE invites SET used_at = datetime('now') WHERE id = ?`, id)
+	return err
+}
+
+// DeleteInvite revokes a pending invite.
+func (d *DB) DeleteInvite(id string) error {
+	_, err := d.sql.Exec(`DELETE FROM invites WHERE id = ? AND used_at IS NULL`, id)
+	return err
 }
 
 // ---- webhooks ----------------------------------------------------------------------

@@ -44,6 +44,10 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/settings/webhooks/add", h.handleSettingsAddWebhook)
 	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/test", h.handleSettingsTestWebhook)
 	mux.HandleFunc("POST /dashboard/settings/webhooks/{webhookId}/delete", h.handleSettingsDeleteWebhook)
+	mux.HandleFunc("GET /invite/{token}", h.handleInvitePage)
+	mux.HandleFunc("POST /invite/{token}", h.handleInviteAccept)
+	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/invites/add", h.handleSettingsCreateInvite)
+	mux.HandleFunc("POST /dashboard/settings/teams/{teamId}/invites/{inviteId}/revoke", h.handleSettingsRevokeInvite)
 }
 
 // ---- handlers ---------------------------------------------------------------
@@ -352,10 +356,17 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		Email     string
 		Role      string
 	}
+	type inviteRow struct {
+		ID      string
+		Email   string
+		Created string
+		Used    bool
+	}
 	type teamRow struct {
 		TeamID  string
 		Name    string
 		Members []memberRow
+		Invites []inviteRow
 	}
 	tRows := make([]teamRow, 0, len(teams))
 	for _, t := range teams {
@@ -368,7 +379,16 @@ func (h *DashboardHandler) handleSettings(w http.ResponseWriter, r *http.Request
 		for _, m := range members {
 			mRows = append(mRows, memberRow{AccountID: m.AccountID, Name: m.Name, Email: m.Email, Role: m.Role})
 		}
-		tRows = append(tRows, teamRow{TeamID: t.ID, Name: t.Name, Members: mRows})
+		invites, err := h.db.ListInvites(t.ID)
+		if err != nil {
+			h.writeError(w, http.StatusInternalServerError, "Could not load invites.")
+			return
+		}
+		iRows := make([]inviteRow, 0, len(invites))
+		for _, inv := range invites {
+			iRows = append(iRows, inviteRow{ID: inv.ID, Email: inv.Email, Created: formatDate(inv.CreatedAt), Used: inv.UsedAt != ""})
+		}
+		tRows = append(tRows, teamRow{TeamID: t.ID, Name: t.Name, Members: mRows, Invites: iRows})
 	}
 	type keyRow struct {
 		ID            string

@@ -485,3 +485,74 @@ func TestWebhookDelivery(t *testing.T) {
 		t.Fatalf("list after delete %d", n)
 	}
 }
+
+func TestInvites(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	ownerID, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, ownerTok, _ := d.CreateAPIKey(ownerID, "cli")
+
+	_, team := doJSON(t, h, "POST", "/api/teams", map[string]any{"name": "Eng"}, ownerTok)
+	teamID := team["team"].(map[string]any)["id"].(string)
+
+	// non-owner cannot invite
+	otherID, _ := d.CreateAccount("Ben", "ben@team.dev")
+	_, otherTok, _ := d.CreateAPIKey(otherID, "cli")
+	doJSON(t, h, "POST", "/api/teams/"+teamID+"/members", map[string]any{"email": "ben@team.dev"}, ownerTok)
+	if rec, _ := doJSON(t, h, "POST", "/api/teams/"+teamID+"/invites", map[string]any{"email": "x@team.dev"}, otherTok); rec.Code != 403 {
+		t.Fatalf("non-owner invite %d", rec.Code)
+	}
+
+	// owner creates invite for a brand-new email
+	rec, out := doJSON(t, h, "POST", "/api/teams/"+teamID+"/invites", map[string]any{"email": "New@Team.dev"}, ownerTok)
+	if rec.Code != 201 {
+		t.Fatalf("create invite %d %v", rec.Code, out)
+	}
+	inviteURL := out["inviteUrl"].(string)
+	token := inviteURL[strings.LastIndex(inviteURL, "/")+1:]
+
+	// resolve
+	if rec, resolved := doJSON(t, h, "GET", "/api/invites/"+token, nil, ""); rec.Code != 200 ||
+		resolved["teamName"] != "Eng" || resolved["email"] != "new@team.dev" {
+		t.Fatalf("resolve invite %d %v", rec.Code, resolved)
+	}
+
+	// accept for a brand-new account
+	rec, accepted := doJSON(t, h, "POST", "/api/invites/"+token+"/accept", map[string]any{"name": "Newbie"}, "")
+	if rec.Code != 200 {
+		t.Fatalf("accept invite %d %v", rec.Code, accepted)
+	}
+	if accepted["teamName"] != "Eng" || accepted["email"] != "new@team.dev" {
+		t.Fatalf("accepted %v", accepted)
+	}
+	newKey := accepted["apiKey"].(string)
+	if newKey == "" {
+		t.Fatalf("no key minted")
+	}
+	// new account is a team member (owner + Ben + Newbie)
+	_, members := doJSON(t, h, "GET", "/api/teams/"+teamID+"/members", nil, ownerTok)
+	if n := len(members["members"].([]any)); n != 3 {
+		t.Fatalf("members after accept %d", n)
+	}
+	// new key works
+	if rec := doRaw(t, h, "GET", "/api/me", newKey); rec.Code != 200 {
+		t.Fatalf("new key me %d", rec.Code)
+	}
+
+	// invite is single-use
+	if rec, _ := doJSON(t, h, "POST", "/api/invites/"+token+"/accept", nil, ""); rec.Code != 404 {
+		t.Fatalf("re-accept %d", rec.Code)
+	}
+
+	// invite for an existing account joins without creating a new one
+	rec, out2 := doJSON(t, h, "POST", "/api/teams/"+teamID+"/invites", map[string]any{"email": "ben@team.dev"}, ownerTok)
+	if rec.Code != 201 {
+		t.Fatalf("invite existing %d", rec.Code)
+	}
+	url2 := out2["inviteUrl"].(string)
+	token2 := url2[strings.LastIndex(url2, "/")+1:]
+	_, accepted2 := doJSON(t, h, "POST", "/api/invites/"+token2+"/accept", nil, "")
+	if accepted2["accountId"] != otherID {
+		t.Fatalf("existing account not reused: %v", accepted2)
+	}
+}

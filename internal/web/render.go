@@ -345,6 +345,32 @@ var settingsTpl = template.Must(template.New("settings").Parse(`
     <input class="text inline" type="email" name="email" placeholder="teammate@team.dev" required />
     <button class="button" type="submit">Add member</button>
   </form>
+  <h3 style="margin-top:18px">Invites</h3>
+  {{if .Invites}}
+  <table>
+    <tr><th>Email</th><th>Created</th><th>Status</th><th></th></tr>
+    {{range .Invites}}
+    <tr>
+      <td>{{.Email}}</td>
+      <td class="muted">{{.Created}}</td>
+      <td>{{if .Used}}<span class="pill pill-approved">used</span>{{else}}<span class="pill pill-in_review">pending</span>{{end}}</td>
+      <td>
+        {{if not .Used}}
+        <form method="post" action="/dashboard/settings/teams/{{$.TeamID}}/invites/{{.ID}}/revoke" onsubmit="return confirm('Revoke invite for {{.Email}}?')">
+          <button class="linklike bad" type="submit">Revoke</button>
+        </form>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="muted small">No invites yet.</p>
+  {{end}}
+  <form class="inline-form" method="post" action="/dashboard/settings/teams/{{.TeamID}}/invites/add">
+    <input class="text inline" type="email" name="email" placeholder="teammate@team.dev" required />
+    <button class="button" type="submit">Invite by email</button>
+  </form>
   {{end}}
 
   <h2 id="webhooks">Webhooks</h2>
