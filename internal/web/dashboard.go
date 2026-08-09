@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/10xdev4u-alt/princedotdev/internal/db"
+	"github.com/10xdev4u-alt/princedotdev/internal/diff"
+	"github.com/10xdev4u-alt/princedotdev/internal/store"
 )
 
 // NewDashboard builds the web UI handler. Sessions are disabled when secret
-// is empty (no SESSION_SECRET). storageBudget feeds the settings meter.
-func NewDashboard(cfgSecret string, d *db.DB, storageBudget int64) *DashboardHandler {
-	return &DashboardHandler{db: d, secret: cfgSecret, budget: storageBudget}
+// is empty (no SESSION_SECRET). storageBudget feeds the settings meter; st
+// backs the version diff page.
+func NewDashboard(cfgSecret string, d *db.DB, storageBudget int64, st *store.Store) *DashboardHandler {
+	return &DashboardHandler{db: d, secret: cfgSecret, budget: storageBudget, store: st}
 }
 
 // DashboardHandler serves the web UI. Safe for concurrent ServeHTTP calls.
@@ -22,6 +25,7 @@ type DashboardHandler struct {
 	db     *db.DB
 	secret string
 	budget int64
+	store  *store.Store
 }
 
 // Enabled reports whether sessions are configured (SESSION_SECRET set).
@@ -33,6 +37,7 @@ func (h *DashboardHandler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /dashboard/session", h.handleSession)
 	mux.HandleFunc("POST /auth/sign-out", h.handleSignOut)
 	mux.HandleFunc("GET /dashboard/drafts/{draftId}", h.handleDraftPage)
+	mux.HandleFunc("GET /dashboard/drafts/{draftId}/diff", h.handleDraftDiffPage)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/comments", h.handlePostComment)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/status", h.handlePostStatus)
 	mux.HandleFunc("POST /dashboard/drafts/{draftId}/tags", h.handleDraftTags)
@@ -281,6 +286,147 @@ func (h *DashboardHandler) handleDraftPage(w http.ResponseWriter, r *http.Reques
 		Header: h.header(session, "dashboard"),
 		Body:   body,
 	})
+}
+
+// diffLine is one rendered line of the diff page.
+type diffLine struct {
+	Kind   string
+	Prefix string
+	Text   string
+	OldN   int
+	NewN   int
+}
+
+// diffHunk is one hunk with a header and lines.
+type diffHunk struct {
+	Header string
+	Lines  []diffLine
+}
+
+// diffVersion is a picker entry for one draft version.
+type diffVersion struct {
+	Number int64
+	Label  string
+}
+
+func (h *DashboardHandler) handleDraftDiffPage(w http.ResponseWriter, r *http.Request) {
+	session := h.requireSession(w, r)
+	if session == nil {
+		return
+	}
+	draft, err := h.db.FindDraft(r.PathValue("draftId"))
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not load draft.")
+		return
+	}
+	if draft == nil || draft.DeletedAt != "" {
+		h.writeError(w, http.StatusNotFound, "Draft not found.")
+		return
+	}
+	if !h.canView(draft, session) {
+		h.writeError(w, http.StatusForbidden, "You don't have access to this draft.")
+		return
+	}
+	versions, err := h.db.ListVersions(draft.ID)
+	if err != nil || len(versions) < 2 {
+		h.writeError(w, http.StatusNotFound, "Not enough versions to diff.")
+		return
+	}
+
+	from := int64(0)
+	if v := r.URL.Query().Get("from"); v != "" {
+		from, _ = strconv.ParseInt(v, 10, 64)
+	}
+	to := int64(0)
+	if v := r.URL.Query().Get("to"); v != "" {
+		to, _ = strconv.ParseInt(v, 10, 64)
+	}
+	// Default: compare the newest version against the one before it.
+	if to == 0 {
+		to = versions[0].VersionNumber
+	}
+	if from == 0 {
+		for _, v := range versions {
+			if v.VersionNumber < to {
+				from = v.VersionNumber
+				break
+			}
+		}
+	}
+	if from == 0 || from == to {
+		h.writeError(w, http.StatusBadRequest, "Choose two different versions to compare.")
+		return
+	}
+
+	vFrom, err := h.db.GetVersion(draft.ID, from)
+	if err != nil || vFrom == nil {
+		h.writeError(w, http.StatusNotFound, "Version not found.")
+		return
+	}
+	vTo, err := h.db.GetVersion(draft.ID, to)
+	if err != nil || vTo == nil {
+		h.writeError(w, http.StatusNotFound, "Version not found.")
+		return
+	}
+	oldHTML, err := h.store.Get(vFrom.ObjectKey)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not read version content.")
+		return
+	}
+	newHTML, err := h.store.Get(vTo.ObjectKey)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Could not read version content.")
+		return
+	}
+
+	hunks := diff.Lines(string(oldHTML), string(newHTML))
+	rows := make([]diffHunk, 0, len(hunks))
+	for _, hk := range hunks {
+		lines := make([]diffLine, 0, len(hk.Lines))
+		for _, l := range hk.Lines {
+			prefix := " "
+			switch l.Kind {
+			case diff.KindAdd:
+				prefix = "+"
+			case diff.KindDel:
+				prefix = "−"
+			}
+			lines = append(lines, diffLine{Kind: l.Kind, Prefix: prefix, Text: l.Text, OldN: l.OldN, NewN: l.NewN})
+		}
+		rows = append(rows, diffHunk{
+			Header: hunkHeader(hk.OldStart, hk.OldCount, hk.NewStart, hk.NewCount),
+			Lines:  lines,
+		})
+	}
+	added, removed := diff.Counts(hunks)
+
+	picks := make([]diffVersion, 0, len(versions))
+	for _, v := range versions {
+		picks = append(picks, diffVersion{Number: v.VersionNumber, Label: "v" + itoa(v.VersionNumber)})
+	}
+
+	body := template.HTML(execOrEmpty(dashboardDiffTpl, map[string]any{
+		"DraftID":   draft.ID,
+		"Title":     draft.Title,
+		"From":      from,
+		"To":        to,
+		"Versions":  picks,
+		"Hunks":     rows,
+		"Added":     added,
+		"Removed":   removed,
+		"FromLabel": formatDate(vFrom.CreatedAt),
+		"ToLabel":   formatDate(vTo.CreatedAt),
+		"HasDiff":   len(rows) > 0,
+	}))
+	h.writePage(w, http.StatusOK, Page{
+		Title:  "Diff · " + draft.Title + " — draftdeck",
+		Header: h.header(session, "dashboard"),
+		Body:   body,
+	})
+}
+
+func hunkHeader(oldStart, oldCount, newStart, newCount int) string {
+	return "@@ -" + itoa(int64(oldStart)) + "," + itoa(int64(oldCount)) + " +" + itoa(int64(newStart)) + "," + itoa(int64(newCount)) + " @@"
 }
 
 func (h *DashboardHandler) handlePostComment(w http.ResponseWriter, r *http.Request) {

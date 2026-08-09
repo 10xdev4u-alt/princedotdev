@@ -93,6 +93,20 @@ const pageCSS = `<!doctype html>
   .meter-fill{height:100%;background:var(--nord8);border-radius:999px}
   .meter-fill.warn{background:var(--nord13)}
   .meter-fill.bad{background:var(--nord11)}
+  .diff-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+  .diff-stats{font-size:13px;margin:6px 0 2px;color:var(--nord4)}
+  .diff-stats .add{color:var(--nord14);font-weight:600}
+  .diff-stats .del{color:var(--nord11);font-weight:600}
+  .hunk{background:var(--nord1);border:1px solid var(--nord2);border-radius:8px;margin:10px 0;overflow:hidden}
+  .hunk-header{background:var(--nord2);color:var(--nord9);font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;padding:5px 12px}
+  .diff-line{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12.5px;padding:2px 12px;white-space:pre-wrap;word-break:break-word;display:flex;gap:10px}
+  .diff-line .num{color:var(--nord3);min-width:52px;text-align:right;flex-shrink:0;font-size:11px}
+  .diff-line .body{flex:1}
+  .diff-add{background:rgba(163,190,140,0.13)}
+  .diff-add .body{color:#a3be8c}
+  .diff-del{background:rgba(191,97,106,0.13)}
+  .diff-del .body{color:#bf616a}
+  .diff-ctx .body{color:var(--nord4)}
   .inline-form{display:flex;gap:8px;align-items:center;margin-top:8px}
   .text.inline{width:260px;margin:0}
   .bad{color:var(--nord11)}
@@ -245,6 +259,7 @@ var draftDetailTpl = template.Must(template.New("detail").Parse(`
   </div>
 
   <h2>Versions</h2>
+  <p class="muted small"><a href="/dashboard/drafts/{{.DraftID}}/diff">Compare versions →</a></p>
   <table>
     <tr><th>Version</th><th>Commit</th><th>Ref</th><th>Published</th></tr>
     {{if .Versions}}
@@ -281,6 +296,45 @@ var draftDetailTpl = template.Must(template.New("detail").Parse(`
     <div class="muted small">Tip: include a CSS selector or line reference to anchor the comment.</div>
     <button class="button" type="submit">Post comment</button>
   </form>
+</main>`))
+
+var dashboardDiffTpl = template.Must(template.New("diff").Parse(`
+<main>
+  <div class="title-row">
+    <h1>Diff — {{.Title}}</h1>
+  </div>
+  <p class="muted small"><a href="/dashboard/drafts/{{.DraftID}}">← back to draft</a></p>
+
+  <form class="inline-form" method="get" action="/dashboard/drafts/{{.DraftID}}/diff">
+    <label class="muted small">Compare</label>
+    <select name="from" class="text inline">
+      {{range .Versions}}<option value="{{.Number}}" {{if eq $.From .Number}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <span class="muted small">→</span>
+    <select name="to" class="text inline">
+      {{range .Versions}}<option value="{{.Number}}" {{if eq $.To .Number}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <button class="button" type="submit">Diff</button>
+  </form>
+
+  <p class="diff-stats">v{{.From}} ({{.FromLabel}}) → v{{.To}} ({{.ToLabel}}):
+    <span class="add">+{{.Added}}</span> <span class="del">−{{.Removed}}</span></p>
+
+  {{if .HasDiff}}
+    {{range .Hunks}}
+    <div class="hunk">
+      <div class="hunk-header">{{.Header}}</div>
+      {{range .Lines}}
+      <div class="diff-line diff-{{.Kind}}">
+        <span class="num">{{if .OldN}}{{.OldN}}{{end}} {{if .NewN}}{{.NewN}}{{end}}</span>
+        <span class="body">{{.Prefix}} {{.Text}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  {{else}}
+    <p class="muted">No differences between v{{.From}} and v{{.To}}.</p>
+  {{end}}
 </main>`))
 
 var cliAuthTpl = template.Must(template.New("cli").Parse(`

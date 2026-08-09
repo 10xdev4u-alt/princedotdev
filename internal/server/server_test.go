@@ -745,3 +745,58 @@ func TestTagsAndFilters(t *testing.T) {
 		t.Fatalf("tag after clear %d", n)
 	}
 }
+
+func TestDraftDiffAPI(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	id, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, token, _ := d.CreateAPIKey(id, "cli")
+	h := s.Handler()
+
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": "<h1>One</h1>\n<p>alpha</p>\n", "filename": "p.html"}, token)
+	draftID := up["draftId"].(string)
+
+	// second version with an edit + an addition
+	_, up2 := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": "<h1>One!</h1>\n<p>alpha</p>\n<p>beta</p>\n", "filename": "p.html", "draftId": draftID}, token)
+	if up2["draftId"].(string) != draftID {
+		t.Fatalf("second upload created a new draft: %v", up2["draftId"])
+	}
+
+	rec, body := doJSON(t, h, "GET", "/api/drafts/"+draftID+"/diff?from=1&to=2", nil, token)
+	if rec.Code != 200 {
+		t.Fatalf("diff status %d: %v", rec.Code, body)
+	}
+	if body["from"].(float64) != 1 || body["to"].(float64) != 2 {
+		t.Fatalf("range %v -> %v", body["from"], body["to"])
+	}
+	stats := body["stats"].(map[string]any)
+	if stats["added"].(float64) != 2 || stats["removed"].(float64) != 1 {
+		t.Fatalf("stats %v", stats)
+	}
+	hunks := body["hunks"].([]any)
+	if len(hunks) == 0 {
+		t.Fatal("expected hunks")
+	}
+	// the edit should appear as a deletion then an addition in order
+	hunk := hunks[0].(map[string]any)
+	lines := hunk["lines"].([]any)
+	var kinds []string
+	for _, l := range lines {
+		kinds = append(kinds, l.(map[string]any)["kind"].(string))
+	}
+	joined := strings.Join(kinds, ",")
+	if !strings.Contains(joined, "del,add") {
+		t.Fatalf("edit not del-before-add: %v", kinds)
+	}
+
+	// same-version comparison is rejected
+	rec, body = doJSON(t, h, "GET", "/api/drafts/"+draftID+"/diff?from=2&to=2", nil, token)
+	if rec.Code != 400 {
+		t.Fatalf("same-version status %d", rec.Code)
+	}
+
+	// no auth -> 401
+	rec, _ = doJSON(t, h, "GET", "/api/drafts/"+draftID+"/diff?from=1&to=2", nil, "")
+	if rec.Code != 401 {
+		t.Fatalf("unauthenticated diff status %d", rec.Code)
+	}
+}

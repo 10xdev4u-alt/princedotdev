@@ -71,6 +71,7 @@ func (s *Server) routes() {
 	m.Handle("GET /api/drafts/{draftId}/comments", s.noStore(http.HandlerFunc(s.handleListComments)))
 	m.Handle("POST /api/drafts/{draftId}/comments", s.requireAuth(s.handleAddComment))
 	m.Handle("POST /api/drafts/{draftId}/status", s.requireAuth(s.handleSetStatus))
+	m.Handle("GET /api/drafts/{draftId}/diff", s.requireAuth(s.handleDraftDiff))
 	m.Handle("DELETE /api/drafts/{draftId}", s.requireAuth(s.handleDeleteDraft))
 
 	// Teams
@@ -119,7 +120,7 @@ func (s *Server) routes() {
 	m.Handle("GET /d/{draftId}/v/{versionNumber}/raw", s.noStore(s.handleServe()))
 
 	// Web dashboard (session-gated); register only when SESSION_SECRET is set.
-	s.dashboard = web.NewDashboard(s.cfg.SessionSecret, s.db, s.cfg.StorageBudget)
+	s.dashboard = web.NewDashboard(s.cfg.SessionSecret, s.db, s.cfg.StorageBudget, s.store)
 	if s.dashboard.Enabled() {
 		s.dashboard.Routes(m)
 	}
