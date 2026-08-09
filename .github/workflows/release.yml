@@ -71,10 +71,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
+      # Only the CLI artifacts. The container job also uploads a docker
+      # buildx cache artifact; merge-multiple pulls everything and that
+      # cache artifact fails to extract (download-artifact flake).
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+          pattern: cli-*
       - name: Create release with binaries
         env:
           GH_TOKEN: ${{ github.token }}
