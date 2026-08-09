@@ -106,6 +106,7 @@ func (s *Server) handleAcceptInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})
 		return
 	}
+	s.recordTeamActivity("member_joined", account.Name, "joined via invite", inv.TeamID)
 	_, apiToken, err := s.db.CreateAPIKey(account.ID, "invite")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"ok": false, "error": "Internal server error."})

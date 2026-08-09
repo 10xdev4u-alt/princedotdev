@@ -160,6 +160,8 @@ func (s *Server) handleAddComment(w http.ResponseWriter, r *http.Request) {
 		VersionNumber: versionNumber,
 		Comment:       &comment,
 	})
+	s.recordActivity("comment", key.AccountName, "commented: "+truncate(text, 120), draft)
+	s.recordMentions(text, key.AccountName, draft)
 
 	writeJSON(w, http.StatusCreated, map[string]any{"ok": true, "comment": decorateComment(comment)})
 }
@@ -210,6 +212,7 @@ func (s *Server) handleSetStatus(w http.ResponseWriter, r *http.Request) {
 		FromStatus: from,
 		ToStatus:   req.Status,
 	})
+	s.recordActivity("status", key.AccountName, "moved "+from+" → "+req.Status, draft)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "draft": s.decorateDraft(draft)})
 }
 

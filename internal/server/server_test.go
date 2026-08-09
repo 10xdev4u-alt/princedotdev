@@ -556,3 +556,51 @@ func TestInvites(t *testing.T) {
 		t.Fatalf("existing account not reused: %v", accepted2)
 	}
 }
+
+func TestActivityFeed(t *testing.T) {
+	s, d, _ := newTestServer(t, nil)
+	h := s.Handler()
+	mayaID, _ := d.CreateAccount("Maya", "maya@team.dev")
+	_, mayaTok, _ := d.CreateAPIKey(mayaID, "cli")
+	zoeyID, _ := d.CreateAccount("Zoey", "zoey@team.dev")
+	_, zoeyTok, _ := d.CreateAPIKey(zoeyID, "cli")
+
+	_, up := doJSON(t, h, "POST", "/api/uploads", map[string]any{"html": testHTML, "filename": "p.html"}, mayaTok)
+	draftID := up["draftId"].(string)
+
+	// comment with a mention of zoey
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/comments",
+		map[string]any{"body": "please fix @zoey@team.dev — see anchor"}, mayaTok)
+	// status change
+	doJSON(t, h, "POST", "/api/drafts/"+draftID+"/status", map[string]any{"status": "in_review"}, mayaTok)
+
+	// Maya's feed: upload, comment, status (3 entries)
+	_, feed := doJSON(t, h, "GET", "/api/activity", nil, mayaTok)
+	items := feed["activity"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("maya feed %d", len(items))
+	}
+	// Zoey's feed: only the mention (1 entry)
+	_, feedZ := doJSON(t, h, "GET", "/api/activity", nil, zoeyTok)
+	itemsZ := feedZ["activity"].([]any)
+	if len(itemsZ) != 1 {
+		t.Fatalf("zoey feed %d", len(itemsZ))
+	}
+	first := itemsZ[0].(map[string]any)
+	if first["kind"] != "mention" || !strings.Contains(first["body"].(string), "mentioned you") {
+		t.Fatalf("mention %v", first)
+	}
+	// unread counts
+	_, feedM := doJSON(t, h, "GET", "/api/activity", nil, mayaTok)
+	if feedM["unread"].(float64) != 3 {
+		t.Fatalf("unread %v", feedM["unread"])
+	}
+	// mark read
+	if rec, _ := doJSON(t, h, "POST", "/api/activity/read", nil, mayaTok); rec.Code != 200 {
+		t.Fatalf("mark read %d", rec.Code)
+	}
+	_, feedM2 := doJSON(t, h, "GET", "/api/activity", nil, mayaTok)
+	if feedM2["unread"].(float64) != 0 {
+		t.Fatalf("unread after read %v", feedM2["unread"])
+	}
+}

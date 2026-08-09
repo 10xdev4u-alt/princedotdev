@@ -84,6 +84,10 @@ func (s *Server) routes() {
 	m.Handle("GET /api/invites/{token}", s.noStore(http.HandlerFunc(s.handleGetInvite)))
 	m.Handle("POST /api/invites/{token}/accept", s.noStore(http.HandlerFunc(s.handleAcceptInvite)))
 
+	// Activity feed
+	m.Handle("GET /api/activity", s.requireAuth(s.handleActivity))
+	m.Handle("POST /api/activity/read", s.requireAuth(s.handleMarkActivityRead))
+
 	// Control panel
 	m.Handle("GET /api/stats", s.requireAuth(s.handleStats))
 	m.Handle("POST /api/api-keys", s.requireAuth(s.handleMintKey))

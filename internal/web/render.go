@@ -165,6 +165,27 @@ var dashboardTpl = template.Must(template.New("dashboard").Parse(`
       <li class="muted">No teams yet.</li>
     {{end}}
   </ul>
+
+  <h2 id="activity">Activity{{if gt .Unread 0}} <span class="pill pill-in_review">{{.Unread}} new</span>{{end}}</h2>
+  {{if .Activity}}
+  <div class="list">
+    {{range .Activity}}
+    <div class="row">
+      <div>
+        <span class="pill pill-{{.Kind}}">{{.KindLabel}}</span>
+        <b>{{.Actor}}</b> <span class="muted">{{.Body}}</span>
+        {{if .DraftID}}— <a href="/dashboard/drafts/{{.DraftID}}">view</a>{{end}}
+      </div>
+      <div class="row-meta muted small">{{.TimeLabel}}</div>
+    </div>
+    {{end}}
+  </div>
+  <form method="post" action="/dashboard/activity/read">
+    <button class="linklike" type="submit">Mark all as read</button>
+  </form>
+  {{else}}
+  <p class="muted">Nothing yet — uploads, comments, and status changes land here.</p>
+  {{end}}
 </main>
 <script>
   document.querySelectorAll(".filter-btn").forEach((btn) => {
